@@ -1,0 +1,65 @@
+syntax = "proto3";
+package proto;
+option go_package = "raft/proto";
+
+enum Command {
+  PUT = 0;
+  DELETE = 1;
+  WRITE_SST = 2;
+}
+
+message KVPair {
+    string Key = 1;
+    string Value = 2;
+    Command command = 3;
+}
+
+message WALEntry {  
+    uint64 Index = 1;
+    string key = 2;
+    optional bytes value = 3;
+    uint32  CRC = 4;
+    Command command = 5;
+}
+
+message RaftLog {
+    uint64 Index = 1;
+    uint64 Term = 2;
+    string key = 3;
+    optional bytes value = 4;
+    uint32  CRC = 5;
+    Command command = 6;
+}
+
+message AppendEntriesArgs {
+    uint64 Term = 1;         
+    uint64 LeaderID = 2;    
+    uint64 PrevLogIndex = 3;     
+    uint64 PrevLogTerm = 4;
+    uint64 LeaderCommit = 5;  
+    repeated KVPair Entries = 6;  
+}
+
+message AppendEntriesReply {
+    uint64 Term = 1;
+    uint64 ConflictIndex = 2;
+    uint64 ConflictTerm = 3;
+    bool Success = 4;
+}
+
+message RequestVoteArgs {
+    uint64 Term = 1;
+    uint64 CandidateID = 2;
+    uint64 LastLogIndex = 3;
+    uint64 LastLogTerm = 4;
+}
+
+message RequestVoteReply {
+    uint64 Term = 1;
+    bool VoteGranted = 2;
+}
+
+message RaftState {
+    uint64 Term = 1;
+    string VotedFor = 2;
+}
