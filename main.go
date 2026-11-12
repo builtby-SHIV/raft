@@ -90,7 +90,6 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	var req NonAddRequest
-	var nf *storage.NotFoundError
 	if key := r.URL.Query().Get("key"); key != "" {
 		req.Key = key
 	} else if r.Body != nil {
@@ -101,7 +100,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{req.Key: v})
+	// _ = json.NewEncoder(w).Encode(map[string]string{req.Key: v})
 }
 
 func (s *Server) delete(w http.ResponseWriter, r *http.Request) {

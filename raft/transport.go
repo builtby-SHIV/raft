@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -278,7 +277,7 @@ func (t *TCPTransport) RequestVote(
 		err error
 	)
 	
-	encodedMsg, err := EncodeMessage(TypeAppendEntries, args)
+	err = EncodeAndWriteMessage(TypeAppendEntries, args)
 	if err != nil {
 		return &proto.RequestVoteReply{}, err
 	}
@@ -306,15 +305,7 @@ func (t *TCPTransport) RequestVote(
 		peer.mu.Unlock()
 	}
 
-	w := bufio.NewWriter(peer.conn)
-	if _, err := w.Write(encodedMsg); err != nil {
-		return &proto.RequestVoteReply{}, err
-	}
-	if err := w.Flush(); err != nil {
-		return &proto.RequestVoteReply{}, err
-	}
-
-	_, decodedMsg, err := DecodeMessage(peer.conn)
+	_, decodedMsg, err := DecodeAndReadMessage(peer.conn)
 	if err != nil {
 		return &proto.RequestVoteReply{}, err
 	}

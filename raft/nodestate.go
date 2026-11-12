@@ -87,21 +87,6 @@ const (
 	MAX_Entries			uint64 = 50
 )
 
-func ParseRole(s string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "leader":
-		return RoleLeader, nil
-	case "follower":
-		return RoleFollower, nil
-	case "observer":
-		return RoleObserver, nil
-	case "unknown", "":
-		return RoleUnknown, nil
-	default:
-		return RoleUnknown, fmt.Errorf("unknown role %q: must be one of leader, follower, observer", s)
-	}
-}
-
 func NewNodeState(
 	id uint64,
 	httpAddr,
@@ -186,15 +171,13 @@ func (ns *NodeState) Save() error {
 	if ns.RaftState == nil {
 		ns.RaftState = &proto.RaftState{
 			Term:    0,
-			VoteFor: -1,
-			Log:     []*proto.RaftLog{},
+			VotedFor: "",
 		}
 	}
 
 	payload := &proto.RaftState{
 		Term:    ns.RaftState.Term,
-		VoteFor: ns.RaftState.VoteFor,
-		Log:     ns.RaftState.Log,
+		VotedFor: ns.RaftState.VotedFor,
 	}
 
 	data := proto.MustMarshal(payload)
@@ -254,7 +237,7 @@ func (ns *NodeState) UpdateRole(role string) error {
 }
 
 func (ns *NodeState) run() {
-	go ns.tp.ListenLoop(ns.tp.TCPAddr, ns.rpcCh)
+	go ns.tp.ListenLoop(ns.tp.TCPAddr, ns.replyCh)
 	for {
 		switch ns.Role {
 		case RoleLeader:
