@@ -127,7 +127,7 @@ func handleIncoming(conn net.Conn, ctx context.Context, rpCh chan *RPCEvent) {
 }
 
 func (t *TCPTransport) sendToAppendEntries(
-	id string, 
+	addr string, 
 	msgType byte,
 	args *proto.AppendEntriesArgs,
 	replyCh chan *RPCEvent,
@@ -142,20 +142,20 @@ func (t *TCPTransport) sendToAppendEntries(
 		return
 	}(t.ctx)
 
-	reply, err := t.AppendEntries(id, args)
+	reply, err := t.AppendEntries(addr, args)
 	if err != nil {
 		fmt.Printf("Error in sending or receiving message %v\n", err)
 	}
 
 	select {
-		case replyCh<- &RPCEvent{ msgType: msgType, msgRecv: reply, msgSent: args, peer: id }:
+		case replyCh<- &RPCEvent{ msgType: msgType, msgRecv: reply, msgSent: args, peer: addr }:
 		case <-t.ctx.Done():
 	}
 	return
 }
 
 func (t *TCPTransport) sendToRequestVote(
-	id string, 
+	addr string, 
 	msgType byte,
 	args *proto.RequestVoteArgs,
 	replyCh chan *RPCEvent,
@@ -170,27 +170,27 @@ func (t *TCPTransport) sendToRequestVote(
 		return
 	}(t.ctx)
 
-	reply, err := t.RequestVote(id, args)
+	reply, err := t.RequestVote(addr, args)
 	if err != nil {
 		fmt.Printf("Error in sending or receiving message %v\n", err)
 	}
 
 	select {
-		case replyCh<- &RPCEvent{ msgType: msgType, msg: reply, peer: id }:
+		case replyCh<- &RPCEvent{ msgType: msgType, msgRecv: reply, msgSent: args, peer: addr }:
 		case <-t.ctx.Done():
 	}
 	return
 }
 
 func (t *TCPTransport) AppendEntries(
-	id string, 
+	addr string, 
 	args *proto.AppendEntriesArgs,
 ) (*proto.AppendEntriesReply, error) {
 	t.mu.RLock()
-	peer, exists := t.Peers[id]
+	peer, exists := t.Peers[addr]
 	t.mu.RUnlock() 
 	if !exists {
-		return &proto.AppendEntriesReply{}, fmt.Errorf("peer %s not found", id)
+		return &proto.AppendEntriesReply{}, fmt.Errorf("peer %s not found", addr)
 	}
 
 	done := make(chan struct{})
@@ -216,7 +216,7 @@ func (t *TCPTransport) AppendEntries(
 		backoff := 50 * time.Millisecond
 		for {
 			dialer := &net.Dialer{}
-			conn, err = dialer.DialContext(t.ctx, "tcp", peer.addr)
+			conn, err = dialer.DialContext(t.ctx, "tcp", addr)
 			if err == nil {
 				break
 			}
@@ -248,14 +248,14 @@ func (t *TCPTransport) AppendEntries(
 }
 
 func (t *TCPTransport) RequestVote(
-	id string, 
+	addr string, 
 	args *proto.RequestVoteArgs,
 ) (*proto.RequestVoteReply, error) {
 	t.mu.RLock()
-	peer, exists := t.Peers[id]
+	peer, exists := t.Peers[addr]
 	t.mu.RUnlock() 
 	if !exists {
-		return &proto.RequestVoteReply{}, fmt.Errorf("peer %s not found", id)
+		return &proto.RequestVoteReply{}, fmt.Errorf("peer %s not found", addr)
 	}
 
 	done := make(chan struct{})
@@ -276,17 +276,12 @@ func (t *TCPTransport) RequestVote(
 		conn net.Conn
 		err error
 	)
-	
-	err = EncodeAndWriteMessage(TypeAppendEntries, args)
-	if err != nil {
-		return &proto.RequestVoteReply{}, err
-	}
 
 	if peer.conn == nil {
 		backoff := 50 * time.Millisecond
 		for {
 			dialer := &net.Dialer{}
-			conn, err = dialer.DialContext(t.ctx, "tcp", peer.addr)
+			conn, err = dialer.DialContext(t.ctx, "tcp", addr)
 			if err == nil {
 				break
 			}
@@ -303,6 +298,10 @@ func (t *TCPTransport) RequestVote(
 		peer.mu.Lock()
 		peer.conn = conn
 		peer.mu.Unlock()
+	}
+
+	if err := EncodeAndWriteMessage(peer.conn, TypeAppendEntries, args); err != nil {
+		return &proto.RequestVoteReply{}, err
 	}
 
 	_, decodedMsg, err := DecodeAndReadMessage(peer.conn)
