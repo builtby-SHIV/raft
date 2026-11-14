@@ -22,13 +22,6 @@ import (
 	"raft/storage"
 )
 
-const (
-	RoleLeader   = "leader"
-	RoleFollower = "follower"
-	RoleObserver = "observer"
-	RoleUnknown  = "unknown"
-)
-
 type Response struct {
 	Message string
 }
@@ -58,15 +51,15 @@ type ServerConfig struct {
 func parseRole(s string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "leader":
-		return RoleLeader, nil
+		return raft.RoleLeader, nil
 	case "follower":
-		return RoleFollower, nil
-	case "observer":
-		return RoleObserver, nil
+		return raft.RoleFollower, nil
+	case "candidate":
+		return raft.RoleCandidate, nil
 	case "unknown", "":
-		return RoleUnknown, nil
+		return raft.RoleUnknown, nil
 	default:
-		return RoleUnknown, fmt.Errorf("unknown role %q: must be one of leader, follower, observer", s)
+		return raft.RoleUnknown, fmt.Errorf("unknown role %q: must be one of leader, follower, observer", s)
 	}
 }
 
@@ -82,10 +75,12 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ns.ClientCh<- &raft.ClientCmd{ Command: proto.Command_PUT, Key: req.Key, Value: req.Val }
-	
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(Response{Message: "Key-Val pair created"})
+	status := <-s.ns.ClientCh
+	if status.Committed == true {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(Response{Message: "Key-Val pair created"})
+	}
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -211,9 +206,6 @@ func resolveConfig(
 	role, err := parseRole(roleFlag)
 	if err != nil {
 		return nil, fmt.Errorf("invalid --role=%q: %w", roleFlag, err)
-	}
-	if role == RoleUnknown {
-		return nil, fmt.Errorf("invalid --role=%q: must be one of leader, follower, observer", roleFlag)
 	}
 
 	dataDir := strings.TrimSpace(dataDirFlag)

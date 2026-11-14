@@ -73,7 +73,7 @@ func (Command) EnumDescriptor() ([]byte, []int) {
 type KVPair struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           string                 `protobuf:"bytes,1,opt,name=Key,proto3" json:"Key,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=Value,proto3" json:"Value,omitempty"`
+	Value         *string                `protobuf:"bytes,2,opt,name=Value,proto3,oneof" json:"Value,omitempty"`
 	Command       Command                `protobuf:"varint,3,opt,name=command,proto3,enum=proto.Command" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -117,89 +117,13 @@ func (x *KVPair) GetKey() string {
 }
 
 func (x *KVPair) GetValue() string {
-	if x != nil {
-		return x.Value
+	if x != nil && x.Value != nil {
+		return *x.Value
 	}
 	return ""
 }
 
 func (x *KVPair) GetCommand() Command {
-	if x != nil {
-		return x.Command
-	}
-	return Command_PUT
-}
-
-type WALEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint64                 `protobuf:"varint,1,opt,name=Index,proto3" json:"Index,omitempty"`
-	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	Value         []byte                 `protobuf:"bytes,3,opt,name=value,proto3,oneof" json:"value,omitempty"`
-	CRC           uint32                 `protobuf:"varint,4,opt,name=CRC,proto3" json:"CRC,omitempty"`
-	Command       Command                `protobuf:"varint,5,opt,name=command,proto3,enum=proto.Command" json:"command,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WALEntry) Reset() {
-	*x = WALEntry{}
-	mi := &file_serialization_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WALEntry) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WALEntry) ProtoMessage() {}
-
-func (x *WALEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WALEntry.ProtoReflect.Descriptor instead.
-func (*WALEntry) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *WALEntry) GetIndex() uint64 {
-	if x != nil {
-		return x.Index
-	}
-	return 0
-}
-
-func (x *WALEntry) GetKey() string {
-	if x != nil {
-		return x.Key
-	}
-	return ""
-}
-
-func (x *WALEntry) GetValue() []byte {
-	if x != nil {
-		return x.Value
-	}
-	return nil
-}
-
-func (x *WALEntry) GetCRC() uint32 {
-	if x != nil {
-		return x.CRC
-	}
-	return 0
-}
-
-func (x *WALEntry) GetCommand() Command {
 	if x != nil {
 		return x.Command
 	}
@@ -220,7 +144,7 @@ type RaftLog struct {
 
 func (x *RaftLog) Reset() {
 	*x = RaftLog{}
-	mi := &file_serialization_proto_msgTypes[2]
+	mi := &file_serialization_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -232,7 +156,7 @@ func (x *RaftLog) String() string {
 func (*RaftLog) ProtoMessage() {}
 
 func (x *RaftLog) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[2]
+	mi := &file_serialization_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -245,7 +169,7 @@ func (x *RaftLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RaftLog.ProtoReflect.Descriptor instead.
 func (*RaftLog) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{2}
+	return file_serialization_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RaftLog) GetIndex() uint64 {
@@ -304,7 +228,7 @@ type AppendEntriesArgs struct {
 
 func (x *AppendEntriesArgs) Reset() {
 	*x = AppendEntriesArgs{}
-	mi := &file_serialization_proto_msgTypes[3]
+	mi := &file_serialization_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -316,7 +240,7 @@ func (x *AppendEntriesArgs) String() string {
 func (*AppendEntriesArgs) ProtoMessage() {}
 
 func (x *AppendEntriesArgs) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[3]
+	mi := &file_serialization_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -329,7 +253,7 @@ func (x *AppendEntriesArgs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEntriesArgs.ProtoReflect.Descriptor instead.
 func (*AppendEntriesArgs) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{3}
+	return file_serialization_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AppendEntriesArgs) GetTerm() uint64 {
@@ -386,7 +310,7 @@ type AppendEntriesReply struct {
 
 func (x *AppendEntriesReply) Reset() {
 	*x = AppendEntriesReply{}
-	mi := &file_serialization_proto_msgTypes[4]
+	mi := &file_serialization_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -398,7 +322,7 @@ func (x *AppendEntriesReply) String() string {
 func (*AppendEntriesReply) ProtoMessage() {}
 
 func (x *AppendEntriesReply) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[4]
+	mi := &file_serialization_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,7 +335,7 @@ func (x *AppendEntriesReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEntriesReply.ProtoReflect.Descriptor instead.
 func (*AppendEntriesReply) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{4}
+	return file_serialization_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AppendEntriesReply) GetTerm() uint64 {
@@ -438,6 +362,98 @@ func (x *AppendEntriesReply) GetConflictTerm() uint64 {
 func (x *AppendEntriesReply) GetSuccess() bool {
 	if x != nil {
 		return x.Success
+	}
+	return false
+}
+
+type InstallSnapShotArgs struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Term              uint64                 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
+	LeaderId          uint64                 `protobuf:"varint,2,opt,name=leaderId,proto3" json:"leaderId,omitempty"`
+	LastIncludedIndex uint64                 `protobuf:"varint,3,opt,name=lastIncludedIndex,proto3" json:"lastIncludedIndex,omitempty"`
+	LastIncludedTerm  uint64                 `protobuf:"varint,4,opt,name=lastIncludedTerm,proto3" json:"lastIncludedTerm,omitempty"`
+	Offset            uint64                 `protobuf:"varint,5,opt,name=offset,proto3" json:"offset,omitempty"`
+	Data              []*KVPair              `protobuf:"bytes,6,rep,name=data,proto3" json:"data,omitempty"`
+	Done              bool                   `protobuf:"varint,7,opt,name=done,proto3" json:"done,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *InstallSnapShotArgs) Reset() {
+	*x = InstallSnapShotArgs{}
+	mi := &file_serialization_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallSnapShotArgs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallSnapShotArgs) ProtoMessage() {}
+
+func (x *InstallSnapShotArgs) ProtoReflect() protoreflect.Message {
+	mi := &file_serialization_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallSnapShotArgs.ProtoReflect.Descriptor instead.
+func (*InstallSnapShotArgs) Descriptor() ([]byte, []int) {
+	return file_serialization_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *InstallSnapShotArgs) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *InstallSnapShotArgs) GetLeaderId() uint64 {
+	if x != nil {
+		return x.LeaderId
+	}
+	return 0
+}
+
+func (x *InstallSnapShotArgs) GetLastIncludedIndex() uint64 {
+	if x != nil {
+		return x.LastIncludedIndex
+	}
+	return 0
+}
+
+func (x *InstallSnapShotArgs) GetLastIncludedTerm() uint64 {
+	if x != nil {
+		return x.LastIncludedTerm
+	}
+	return 0
+}
+
+func (x *InstallSnapShotArgs) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *InstallSnapShotArgs) GetData() []*KVPair {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *InstallSnapShotArgs) GetDone() bool {
+	if x != nil {
+		return x.Done
 	}
 	return false
 }
@@ -618,18 +634,12 @@ var File_serialization_proto protoreflect.FileDescriptor
 
 const file_serialization_proto_rawDesc = "" +
 	"\n" +
-	"\x13serialization.proto\x12\x05proto\"Z\n" +
+	"\x13serialization.proto\x12\x05proto\"i\n" +
 	"\x06KVPair\x12\x10\n" +
-	"\x03Key\x18\x01 \x01(\tR\x03Key\x12\x14\n" +
-	"\x05Value\x18\x02 \x01(\tR\x05Value\x12(\n" +
-	"\acommand\x18\x03 \x01(\x0e2\x0e.proto.CommandR\acommand\"\x93\x01\n" +
-	"\bWALEntry\x12\x14\n" +
-	"\x05Index\x18\x01 \x01(\x04R\x05Index\x12\x10\n" +
-	"\x03key\x18\x02 \x01(\tR\x03key\x12\x19\n" +
-	"\x05value\x18\x03 \x01(\fH\x00R\x05value\x88\x01\x01\x12\x10\n" +
-	"\x03CRC\x18\x04 \x01(\rR\x03CRC\x12(\n" +
-	"\acommand\x18\x05 \x01(\x0e2\x0e.proto.CommandR\acommandB\b\n" +
-	"\x06_value\"\xa6\x01\n" +
+	"\x03Key\x18\x01 \x01(\tR\x03Key\x12\x19\n" +
+	"\x05Value\x18\x02 \x01(\tH\x00R\x05Value\x88\x01\x01\x12(\n" +
+	"\acommand\x18\x03 \x01(\x0e2\x0e.proto.CommandR\acommandB\b\n" +
+	"\x06_Value\"\xa6\x01\n" +
 	"\aRaftLog\x12\x14\n" +
 	"\x05Index\x18\x01 \x01(\x04R\x05Index\x12\x12\n" +
 	"\x04Term\x18\x02 \x01(\x04R\x04Term\x12\x10\n" +
@@ -649,7 +659,15 @@ const file_serialization_proto_rawDesc = "" +
 	"\x04Term\x18\x01 \x01(\x04R\x04Term\x12$\n" +
 	"\rConflictIndex\x18\x02 \x01(\x04R\rConflictIndex\x12\"\n" +
 	"\fConflictTerm\x18\x03 \x01(\x04R\fConflictTerm\x12\x18\n" +
-	"\aSuccess\x18\x04 \x01(\bR\aSuccess\"\x8d\x01\n" +
+	"\aSuccess\x18\x04 \x01(\bR\aSuccess\"\xee\x01\n" +
+	"\x13InstallSnapShotArgs\x12\x12\n" +
+	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x1a\n" +
+	"\bleaderId\x18\x02 \x01(\x04R\bleaderId\x12,\n" +
+	"\x11lastIncludedIndex\x18\x03 \x01(\x04R\x11lastIncludedIndex\x12*\n" +
+	"\x10lastIncludedTerm\x18\x04 \x01(\x04R\x10lastIncludedTerm\x12\x16\n" +
+	"\x06offset\x18\x05 \x01(\x04R\x06offset\x12!\n" +
+	"\x04data\x18\x06 \x03(\v2\r.proto.KVPairR\x04data\x12\x12\n" +
+	"\x04done\x18\a \x01(\bR\x04done\"\x8d\x01\n" +
 	"\x0fRequestVoteArgs\x12\x12\n" +
 	"\x04Term\x18\x01 \x01(\x04R\x04Term\x12 \n" +
 	"\vCandidateID\x18\x02 \x01(\x04R\vCandidateID\x12\"\n" +
@@ -683,21 +701,21 @@ func file_serialization_proto_rawDescGZIP() []byte {
 var file_serialization_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_serialization_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_serialization_proto_goTypes = []any{
-	(Command)(0),               // 0: proto.Command
-	(*KVPair)(nil),             // 1: proto.KVPair
-	(*WALEntry)(nil),           // 2: proto.WALEntry
-	(*RaftLog)(nil),            // 3: proto.RaftLog
-	(*AppendEntriesArgs)(nil),  // 4: proto.AppendEntriesArgs
-	(*AppendEntriesReply)(nil), // 5: proto.AppendEntriesReply
-	(*RequestVoteArgs)(nil),    // 6: proto.RequestVoteArgs
-	(*RequestVoteReply)(nil),   // 7: proto.RequestVoteReply
-	(*RaftState)(nil),          // 8: proto.RaftState
+	(Command)(0),                // 0: proto.Command
+	(*KVPair)(nil),              // 1: proto.KVPair
+	(*RaftLog)(nil),             // 2: proto.RaftLog
+	(*AppendEntriesArgs)(nil),   // 3: proto.AppendEntriesArgs
+	(*AppendEntriesReply)(nil),  // 4: proto.AppendEntriesReply
+	(*InstallSnapShotArgs)(nil), // 5: proto.InstallSnapShotArgs
+	(*RequestVoteArgs)(nil),     // 6: proto.RequestVoteArgs
+	(*RequestVoteReply)(nil),    // 7: proto.RequestVoteReply
+	(*RaftState)(nil),           // 8: proto.RaftState
 }
 var file_serialization_proto_depIdxs = []int32{
 	0, // 0: proto.KVPair.command:type_name -> proto.Command
-	0, // 1: proto.WALEntry.command:type_name -> proto.Command
-	0, // 2: proto.RaftLog.command:type_name -> proto.Command
-	1, // 3: proto.AppendEntriesArgs.Entries:type_name -> proto.KVPair
+	0, // 1: proto.RaftLog.command:type_name -> proto.Command
+	1, // 2: proto.AppendEntriesArgs.Entries:type_name -> proto.KVPair
+	1, // 3: proto.InstallSnapShotArgs.data:type_name -> proto.KVPair
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
@@ -710,8 +728,8 @@ func file_serialization_proto_init() {
 	if File_serialization_proto != nil {
 		return
 	}
+	file_serialization_proto_msgTypes[0].OneofWrappers = []any{}
 	file_serialization_proto_msgTypes[1].OneofWrappers = []any{}
-	file_serialization_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

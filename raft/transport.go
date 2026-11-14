@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -50,14 +51,18 @@ func NewTCPTransport(HTTPAddr, TCPAddr string, ctx context.Context) *TCPTranspor
 	return &TCPTransport{
 		HTTPAddr: HTTPAddr,
 		TCPAddr:  TCPAddr,
-		ctx: newCtx,
-		cancel: cancel,
+		Peers:    make(map[string]*peerConn),
+		ctx:      newCtx,
+		cancel:   cancel,
 	}
 }
 
 func (t *TCPTransport) Add(addr string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.Peers == nil {
+		t.Peers = make(map[string]*peerConn)
+	}
 	t.Peers[addr] = &peerConn{}
 }
 
@@ -101,85 +106,110 @@ func (t *TCPTransport) ListenLoop(addr string, rpCh chan *RPCEvent) {
 }
 
 func handleIncoming(conn net.Conn, ctx context.Context, rpCh chan *RPCEvent) {
-	var(
-		msgType	byte
-		msg		googleproto.Message
-		err		error
+	defer conn.Close()
+	for {
+		msgType, msg, err := DecodeAndReadMessage(conn)
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+				fmt.Printf("Error in reading the incoming message %v\n", err)
+			}
+			return
+		}
+
+		sendBack := make(chan *SendBack)
+
+		select {
+		case rpCh <- &RPCEvent{msgType: msgType, msgRecv: msg, sendBack: sendBack}:
+		case <-ctx.Done():
+			return
+		}
+
+		select {
+		case data := <-sendBack:
+			if data != nil && data.msgSent != nil {
+				if err := EncodeAndWriteMessage(conn, data.msgType, data.msgSent); err != nil {
+					fmt.Printf("Error in encoding the message %v\n", err)
+					return
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (t *TCPTransport) sendToPeers(
+	addr string, 
+	msgType byte,
+	args any,
+	replyCh chan *RPCEvent,
+) {
+	done := make(chan struct{})
+	defer close(done)
+	go func(ctx context.Context) {
+		select {
+		case <-t.ctx.Done():
+		case <-done:
+		}
+	}(t.ctx)
+
+	var (
+		reply googleproto.Message
+		err   error
 	)
 
-	if msgType, msg, err = DecodeAndReadMessage(conn); err != nil {
-		fmt.Printf("Error in reading the incoming message %v\n", err)
-		return
+	switch msgType {
+	case TypeAppendEntries:
+		if a, ok := args.(*proto.AppendEntriesArgs); ok {
+			reply, err = t.AppendEntries(addr, a)
+		} else {
+			err = fmt.Errorf("expected *proto.AppendEntriesArgs, got %T", args)
+		}
+	case TypeInstallSnapShot:
+		if a, ok := args.(*proto.InstallSnapShotArgs); ok {
+			reply, err = t.sendInstallSnapshots(addr, a)
+		} else {
+			err = fmt.Errorf("expected *proto.InstallSnapShotArgs, got %T", args)
+		}
+	default:
+		err = fmt.Errorf("unknown msgType: %d", msgType)
+	}
+
+	if err != nil {
+		fmt.Printf("Error in sending or receiving message %v\n", err)
 	}
 
 	sendBack := make(chan *SendBack)
 
-	select {
-		case rpCh<- &RPCEvent{ msgType: msgType, msgRecv: msg, sendBack: sendBack }:
-		case data := <-sendBack:
-		if err := EncodeAndWriteMessage(conn, data.msgType, data.msgSent); err != nil {
-			fmt.Printf("Error in encoding the message %v\n", err)
-			return
-		}
-		case <-ctx.Done():
-		return
-	}
-}
-
-func (t *TCPTransport) sendToAppendEntries(
-	addr string, 
-	msgType byte,
-	args *proto.AppendEntriesArgs,
-	replyCh chan *RPCEvent,
-) {
-	done := make(chan struct{})
-	defer close(done)
-	go func(ctx context.Context) {
-		select {
-		case <-t.ctx.Done():
-		case <-done:
-		}
-		return
-	}(t.ctx)
-
-	reply, err := t.AppendEntries(addr, args)
-	if err != nil {
-		fmt.Printf("Error in sending or receiving message %v\n", err)
+	var msgSent googleproto.Message
+	if m, ok := args.(googleproto.Message); ok {
+		msgSent = m
 	}
 
 	select {
-		case replyCh<- &RPCEvent{ msgType: msgType, msgRecv: reply, msgSent: args, peer: addr }:
-		case <-t.ctx.Done():
-	}
-	return
-}
-
-func (t *TCPTransport) sendToRequestVote(
-	addr string, 
-	msgType byte,
-	args *proto.RequestVoteArgs,
-	replyCh chan *RPCEvent,
-) {
-	done := make(chan struct{})
-	defer close(done)
-	go func(ctx context.Context) {
-		select {
-		case <-t.ctx.Done():
-		case <-done:
-		}
+	case replyCh <- &RPCEvent{msgType: msgType, msgRecv: reply, msgSent: msgSent, peer: addr, sendBack: sendBack}:
+	case <-t.ctx.Done():
 		return
-	}(t.ctx)
-
-	reply, err := t.RequestVote(addr, args)
-	if err != nil {
-		fmt.Printf("Error in sending or receiving message %v\n", err)
 	}
 
-	select {
-		case replyCh<- &RPCEvent{ msgType: msgType, msgRecv: reply, msgSent: args, peer: addr }:
-		case <-t.ctx.Done():
-	}
-	return
+	go func() {
+		for {
+			select {
+			case data, ok := <-sendBack:
+				if !ok || data == nil {
+					return
+				}
+				switch data.msgType {
+				case TypeAppendEntries, TypeInstallSnapShot:
+					go t.sendToPeers(addr, data.msgType, data.msgSent, replyCh)
+				}
+			case <-t.ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
 }
 
 func (t *TCPTransport) AppendEntries(
@@ -204,7 +234,6 @@ func (t *TCPTransport) AppendEntries(
 			}
 		case <-done:
 		}
-		return
 	}(t.ctx)
 
 	var(
@@ -247,15 +276,22 @@ func (t *TCPTransport) AppendEntries(
 	return decodedMsg.(*proto.AppendEntriesReply), nil
 }
 
-func (t *TCPTransport) RequestVote(
+func (t *TCPTransport) SendInstallSnapshots(
 	addr string, 
-	args *proto.RequestVoteArgs,
-) (*proto.RequestVoteReply, error) {
+	args *proto.InstallSnapShotArgs,
+) (*proto.AppendEntriesReply, error) {
+	return t.sendInstallSnapshots(addr, args)
+}
+
+func (t *TCPTransport) sendInstallSnapshots(
+	addr string, 
+	args *proto.InstallSnapShotArgs,
+) (*proto.AppendEntriesReply, error) {
 	t.mu.RLock()
 	peer, exists := t.Peers[addr]
 	t.mu.RUnlock() 
 	if !exists {
-		return &proto.RequestVoteReply{}, fmt.Errorf("peer %s not found", addr)
+		return &proto.AppendEntriesReply{}, fmt.Errorf("peer %s not found", addr)
 	}
 
 	done := make(chan struct{})
@@ -269,7 +305,6 @@ func (t *TCPTransport) RequestVote(
 			}
 		case <-done:
 		}
-		return
 	}(t.ctx)
 
 	var(
@@ -300,7 +335,99 @@ func (t *TCPTransport) RequestVote(
 		peer.mu.Unlock()
 	}
 
-	if err := EncodeAndWriteMessage(peer.conn, TypeAppendEntries, args); err != nil {
+	if err := EncodeAndWriteMessage(peer.conn, TypeInstallSnapShot, args); err != nil {
+		return &proto.AppendEntriesReply{}, err
+	}
+
+	_, decodedMsg, err := DecodeAndReadMessage(peer.conn)
+	if err != nil {
+		return &proto.AppendEntriesReply{}, fmt.Errorf("Error in decoding the message %w", err)
+	}
+	
+	return decodedMsg.(*proto.AppendEntriesReply), nil
+}
+
+func (t *TCPTransport) sendToRequestVote(
+	addr string, 
+	msgType byte,
+	args *proto.RequestVoteArgs,
+	replyCh chan *RPCEvent,
+) {
+	done := make(chan struct{})
+	defer close(done)
+	go func(ctx context.Context) {
+		select {
+		case <-t.ctx.Done():
+		case <-done:
+		}
+	}(t.ctx)
+
+	reply, err := t.RequestVote(addr, args)
+	if err != nil {
+		fmt.Printf("Error in sending or receiving message %v\n", err)
+	}
+
+	sendBack := make(chan *SendBack)
+
+	select {
+	case replyCh <- &RPCEvent{msgType: msgType, msgRecv: reply, msgSent: args, peer: addr, sendBack: sendBack}:
+	case <-t.ctx.Done():
+	}
+}
+
+func (t *TCPTransport) RequestVote(
+	addr string, 
+	args *proto.RequestVoteArgs,
+) (*proto.RequestVoteReply, error) {
+	t.mu.RLock()
+	peer, exists := t.Peers[addr]
+	t.mu.RUnlock() 
+	if !exists {
+		return &proto.RequestVoteReply{}, fmt.Errorf("peer %s not found", addr)
+	}
+
+	done := make(chan struct{})
+	defer close(done)
+	go func(ctx context.Context) {
+		select {
+		case <-t.ctx.Done():
+			if peer.conn != nil {
+				peer.conn.Close()
+				peer.conn = nil
+			}
+		case <-done:
+		}
+	}(t.ctx)
+
+	var(
+		conn net.Conn
+		err error
+	)
+
+	if peer.conn == nil {
+		backoff := 50 * time.Millisecond
+		for {
+			dialer := &net.Dialer{}
+			conn, err = dialer.DialContext(t.ctx, "tcp", addr)
+			if err == nil {
+				break
+			}
+
+			select {
+			case <-time.After(backoff):
+				if backoff < 500 * time.Millisecond {
+					backoff *= 2
+				}
+			case <-t.ctx.Done():
+				return nil, nil
+			}
+		}
+		peer.mu.Lock()
+		peer.conn = conn
+		peer.mu.Unlock()
+	}
+
+	if err := EncodeAndWriteMessage(peer.conn, TypeRequestVote, args); err != nil {
 		return &proto.RequestVoteReply{}, err
 	}
 

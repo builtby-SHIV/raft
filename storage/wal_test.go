@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,10 +69,6 @@ func TestSnapshotCreationAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open wal: %v", err)
 	}
-	defer wal.Close()
-
-	// Use smaller threshold to test the snapshot mechanism quickly
-	wal.SetSnapshotThreshold(5)
 
 	for i := 1; i <= 5; i++ {
 		cmd := proto.Command_PUT
@@ -86,15 +83,21 @@ func TestSnapshotCreationAndMetadata(t *testing.T) {
 		}
 	}
 
+	// Trigger snapshot manually
+	snapPath, err := wal.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("failed to create snapshot: %v", err)
+	}
+	_ = wal.Close()
+
 	snapshotsDir := filepath.Join(tempDir, "snapshots")
 	expectedFileName := "snapshot-5"
 	expectedFilePath := filepath.Join(snapshotsDir, expectedFileName)
 
-	if _, err := os.Stat(expectedFilePath); os.IsNotExist(err) {
-		t.Fatalf("expected snapshot file %s to exist in %s", expectedFileName, snapshotsDir)
+	if snapPath != expectedFilePath {
+		t.Fatalf("expected snapshot path %s, got %s", expectedFilePath, snapPath)
 	}
 
-	// Verify metadata at the start: lastIndex (uint64) and lastTerm (uint64)
 	file, err := os.Open(expectedFilePath)
 	if err != nil {
 		t.Fatalf("failed to open snapshot file: %v", err)
@@ -124,18 +127,6 @@ func TestSnapshotCreationAndMetadata(t *testing.T) {
 	if len(tmpFiles) > 0 {
 		t.Errorf("expected no tmp files, found: %v", tmpFiles)
 	}
-
-	// Read snapshot via helper
-	sIdx, sTerm, entries, err := ReadSnapshot(expectedFilePath)
-	if err != nil {
-		t.Fatalf("failed to read snapshot: %v", err)
-	}
-	if sIdx != 5 || sTerm != 2 {
-		t.Errorf("snapshot metadata mismatch: index=%d, term=%d", sIdx, sTerm)
-	}
-	if len(entries) != 5 {
-		t.Errorf("expected 5 snapshotted entries, got %d", len(entries))
-	}
 }
 
 func TestSnapshotCrossing10000Entries(t *testing.T) {
@@ -151,14 +142,9 @@ func TestSnapshotCrossing10000Entries(t *testing.T) {
 	}
 	defer wal.Close()
 
-	// DefaultSnapshotThreshold is 10000
-	if wal.snapshotThreshold != 10000 {
-		t.Fatalf("expected DefaultSnapshotThreshold to be 10000, got %d", wal.snapshotThreshold)
-	}
-
 	for i := 1; i <= 10000; i++ {
 		cmd := proto.Command_PUT
-		key := fmt.Sprintf("k-%d", i%500) // overwrite keys to test state compaction
+		key := fmt.Sprintf("k-%d", i%500)
 		val := fmt.Sprintf("v-%d", i)
 		term := uint64(3)
 		if err := wal.WriteEntry(cmd, key, []byte(val), term); err != nil {
@@ -174,10 +160,20 @@ func TestSnapshotCrossing10000Entries(t *testing.T) {
 		t.Fatalf("expected snapshot file %s to exist", expectedFilePath)
 	}
 
-	lastIndex, lastTerm, err := ReadSnapshotMetadata(expectedFilePath)
+	file, err := os.Open(expectedFilePath)
 	if err != nil {
-		t.Fatalf("failed to read snapshot metadata: %v", err)
+		t.Fatalf("failed to open snapshot file: %v", err)
 	}
+	defer file.Close()
+
+	var lastIndex, lastTerm uint64
+	if err := binary.Read(file, binary.LittleEndian, &lastIndex); err != nil {
+		t.Fatalf("failed to read lastIndex: %v", err)
+	}
+	if err := binary.Read(file, binary.LittleEndian, &lastTerm); err != nil {
+		t.Fatalf("failed to read lastTerm: %v", err)
+	}
+
 	if lastIndex != 10000 {
 		t.Errorf("expected lastIndex=10000, got %d", lastIndex)
 	}
@@ -216,8 +212,9 @@ func TestRepair(t *testing.T) {
 	}
 }
 
-func TestSnapshotWithPutAndDeleteState(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "wal-snap-state-test-*")
+func TestGetLastTermAndIndex(t *testing.T) {
+	// 1. Empty log with no snapshot
+	tempDir, err := os.MkdirTemp("", "wal-last-term-idx-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -227,43 +224,326 @@ func TestSnapshotWithPutAndDeleteState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open wal: %v", err)
 	}
+	defer wal.Close()
 
-	wal.SetSnapshotThreshold(4)
-
-	_ = wal.WriteEntry(proto.Command_PUT, "foo", []byte("bar1"), 1)
-	_ = wal.WriteEntry(proto.Command_PUT, "foo", []byte("bar2"), 1)
-	_ = wal.WriteEntry(proto.Command_PUT, "baz", []byte("qux"), 1)
-	// 4th entry triggers snapshot
-	_ = wal.WriteEntry(proto.Command_DELETE, "foo", nil, 2)
-
-	_ = wal.Close()
-
-	// Check snapshot file
-	snapPath := filepath.Join(tempDir, "snapshots", "snapshot-4")
-	lastIdx, lastTerm, entries, err := ReadSnapshot(snapPath)
+	term, idx, err := wal.GetLastTermAndIndex()
 	if err != nil {
-		t.Fatalf("failed to read snapshot: %v", err)
+		t.Fatalf("unexpected error on empty log: %v", err)
 	}
-	if lastIdx != 4 || lastTerm != 2 {
-		t.Fatalf("expected lastIndex=4, lastTerm=2; got index=%d, term=%d", lastIdx, lastTerm)
-	}
-
-	// "foo" was deleted, so only "baz" should remain in compacted snapshot state
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry in snapshot state, got %d", len(entries))
-	}
-	if entries[0].Key != "baz" || string(entries[0].Value) != "qux" {
-		t.Fatalf("unexpected entry in snapshot: %+v", entries[0])
+	if term != 0 || idx != 0 {
+		t.Fatalf("expected term=0, idx=0; got term=%d, idx=%d", term, idx)
 	}
 
-	// Reopen WAL and verify it recovers the state and sequences
-	reopened, err := OpenWAL(tempDir, false, 1024*1024, 10)
+	// 2. Log has entries
+	if err := wal.WriteEntry(proto.Command_PUT, "k1", []byte("v1"), 1); err != nil {
+		t.Fatalf("failed to write entry 1: %v", err)
+	}
+	if err := wal.WriteEntry(proto.Command_PUT, "k2", []byte("v2"), 3); err != nil {
+		t.Fatalf("failed to write entry 2: %v", err)
+	}
+
+	term, idx, err = wal.GetLastTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error on log with entries: %v", err)
+	}
+	if term != 3 || idx != 2 {
+		t.Fatalf("expected term=3, idx=2; got term=%d, idx=%d", term, idx)
+	}
+
+	// 3. Snapshot created, then log emptied (truncated/repaired from index 1)
+	_, err = wal.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("failed to create snapshot: %v", err)
+	}
+
+	// Repair from index 1 removes all log entries from the segment
+	_, err = wal.Repair(1)
+	if err != nil {
+		t.Fatalf("failed to repair: %v", err)
+	}
+
+	// Log is now empty, so it should read last term and index from snapshot (term 3, index 2)
+	term, idx, err = wal.GetLastTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error reading from snapshot: %v", err)
+	}
+	if term != 3 || idx != 2 {
+		t.Fatalf("expected term=3, idx=2 from snapshot; got term=%d, idx=%d", term, idx)
+	}
+
+	// 4. Log appends a new entry after the snapshot
+	if err := wal.WriteEntry(proto.Command_PUT, "k3", []byte("v3"), 5); err != nil {
+		t.Fatalf("failed to write entry after snapshot: %v", err)
+	}
+	term, idx, err = wal.GetLastTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if term != 5 || idx != 3 {
+		t.Fatalf("expected term=5, idx=3; got term=%d, idx=%d", term, idx)
+	}
+}
+
+func TestGetFirstTermAndIndex(t *testing.T) {
+	// 1. Empty log with no snapshot
+	tempDir, err := os.MkdirTemp("", "wal-first-term-idx-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	wal, err := OpenWAL(tempDir, false, 1024*1024, 10)
+	if err != nil {
+		t.Fatalf("failed to open wal: %v", err)
+	}
+	defer wal.Close()
+
+	term, idx, err := wal.GetFirstTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error on empty log: %v", err)
+	}
+	if term != 0 || idx != 0 {
+		t.Fatalf("expected term=0, idx=0; got term=%d, idx=%d", term, idx)
+	}
+
+	// 2. Log has entries
+	if err := wal.WriteEntry(proto.Command_PUT, "k1", []byte("v1"), 1); err != nil {
+		t.Fatalf("failed to write entry 1: %v", err)
+	}
+	if err := wal.WriteEntry(proto.Command_PUT, "k2", []byte("v2"), 3); err != nil {
+		t.Fatalf("failed to write entry 2: %v", err)
+	}
+
+	term, idx, err = wal.GetFirstTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error on log with entries: %v", err)
+	}
+	if term != 1 || idx != 1 {
+		t.Fatalf("expected term=1, idx=1; got term=%d, idx=%d", term, idx)
+	}
+
+	// 3. Snapshot created, then log emptied (truncated/repaired from index 1)
+	_, err = wal.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("failed to create snapshot: %v", err)
+	}
+
+	_, err = wal.Repair(1)
+	if err != nil {
+		t.Fatalf("failed to repair: %v", err)
+	}
+
+	// Log is now empty, snapshot has lastIncludedIndex=2, lastIncludedTerm=3
+	// First uncompacted index is 3
+	term, idx, err = wal.GetFirstTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error reading first term/index after snapshot: %v", err)
+	}
+	if term != 3 || idx != 3 {
+		t.Fatalf("expected term=3, idx=3 after snapshot; got term=%d, idx=%d", term, idx)
+	}
+
+	// 4. Log appends a new entry after snapshot
+	if err := wal.WriteEntry(proto.Command_PUT, "k3", []byte("v3"), 5); err != nil {
+		t.Fatalf("failed to write entry after snapshot: %v", err)
+	}
+	term, idx, err = wal.GetFirstTermAndIndex()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if term != 5 || idx != 3 {
+		t.Fatalf("expected term=5, idx=3; got term=%d, idx=%d", term, idx)
+	}
+}
+
+func TestGetEntriesFrom(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "wal-get-entries-from-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	wal, err := OpenWAL(tempDir, false, 1024*1024, 10)
+	if err != nil {
+		t.Fatalf("failed to open wal: %v", err)
+	}
+	defer wal.Close()
+
+	// Write entries:
+	// Index 1, Term 1
+	// Index 2, Term 1
+	// Index 3, Term 2
+	// Index 4, Term 2
+	// Index 5, Term 3
+	_ = wal.WriteEntry(proto.Command_PUT, "k1", []byte("v1"), 1)
+	_ = wal.WriteEntry(proto.Command_PUT, "k2", []byte("v2"), 1)
+	_ = wal.WriteEntry(proto.Command_PUT, "k3", []byte("v3"), 2)
+	_ = wal.WriteEntry(proto.Command_PUT, "k4", []byte("v4"), 2)
+	_ = wal.WriteEntry(proto.Command_PUT, "k5", []byte("v5"), 3)
+
+	// Case 1: startIndex = 1 (start of log)
+	entries, prevIdx, prevTerm, err := wal.GetEntriesFrom(1)
+	if err != nil {
+		t.Fatalf("unexpected error for startIndex 1: %v", err)
+	}
+	if prevIdx != 0 || prevTerm != 0 {
+		t.Fatalf("expected prevIdx=0, prevTerm=0; got prevIdx=%d, prevTerm=%d", prevIdx, prevTerm)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries, got %d", len(entries))
+	}
+	if entries[0].Key != "k1" || entries[0].GetValue() != "v1" || entries[4].Key != "k5" || entries[4].GetValue() != "v5" {
+		t.Fatalf("unexpected entries: %+v ... %+v", entries[0], entries[4])
+	}
+
+	// Case 2: startIndex = 3 (middle of log)
+	entries, prevIdx, prevTerm, err = wal.GetEntriesFrom(3)
+	if err != nil {
+		t.Fatalf("unexpected error for startIndex 3: %v", err)
+	}
+	if prevIdx != 2 || prevTerm != 1 {
+		t.Fatalf("expected prevIdx=2, prevTerm=1; got prevIdx=%d, prevTerm=%d", prevIdx, prevTerm)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries (k3,k4,k5), got %d", len(entries))
+	}
+	if entries[0].Key != "k3" || entries[1].Key != "k4" || entries[2].Key != "k5" {
+		t.Fatalf("unexpected entry keys: %+v", entries)
+	}
+
+	// Case 3: startIndex = 6 (heartbeat / end of log)
+	entries, prevIdx, prevTerm, err = wal.GetEntriesFrom(6)
+	if err != nil {
+		t.Fatalf("unexpected error for startIndex 6: %v", err)
+	}
+	if prevIdx != 5 || prevTerm != 3 {
+		t.Fatalf("expected prevIdx=5, prevTerm=3; got prevIdx=%d, prevTerm=%d", prevIdx, prevTerm)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+
+	// Case 4: Snapshot at index 5, then repair/truncate and add entry 6
+	_, err = wal.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("failed to create snapshot: %v", err)
+	}
+
+	// Truncate log segments up to index 5
+	_, err = wal.Repair(1)
+	if err != nil {
+		t.Fatalf("failed to repair: %v", err)
+	}
+
+	// Now append entry 6, term 4
+	_ = wal.WriteEntry(proto.Command_PUT, "k6", []byte("v6"), 4)
+
+	// startIndex = 6: entry 6 is in log, entry 5 is from the snapshot (lastIndex 5, lastTerm 3)
+	entries, prevIdx, prevTerm, err = wal.GetEntriesFrom(6)
+	if err != nil {
+		t.Fatalf("unexpected error for startIndex 6 with snapshot: %v", err)
+	}
+	if prevIdx != 5 || prevTerm != 3 {
+		t.Fatalf("expected prevIdx=5, prevTerm=3 from snapshot; got prevIdx=%d, prevTerm=%d", prevIdx, prevTerm)
+	}
+	if len(entries) != 1 || entries[0].Key != "k6" || entries[0].GetValue() != "v6" {
+		t.Fatalf("expected 1 entry with key k6, val v6; got %+v", entries)
+	}
+
+	// Case 5: startIndex < snapshot lastIndex (compacted)
+	_, _, _, err = wal.GetEntriesFrom(2)
+	if err == nil || !errors.Is(err, ErrCompacted) {
+		t.Fatalf("expected ErrCompacted for index 2, got %v", err)
+	}
+}
+
+func TestStreamSnapshot(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "wal-stream-snap-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	wal, err := OpenWAL(tempDir, false, 1024*1024, 10)
+	if err != nil {
+		t.Fatalf("failed to open wal: %v", err)
+	}
+	defer wal.Close()
+
+	// 1. When no snapshot exists, should return error
+	_, _, _, err = wal.StreamSnapshot()
+	if err == nil {
+		t.Fatalf("expected error streaming when no snapshot exists, got nil")
+	}
+
+	// 2. Write entries:
+	// PUT a = 1
+	// PUT b = 2
+	// PUT c = 3
+	// PUT a = 10 (overwrite)
+	// DELETE b
+	_ = wal.WriteEntry(proto.Command_PUT, "a", []byte("1"), 1)
+	_ = wal.WriteEntry(proto.Command_PUT, "b", []byte("2"), 1)
+	_ = wal.WriteEntry(proto.Command_PUT, "c", []byte("3"), 2)
+	_ = wal.WriteEntry(proto.Command_PUT, "a", []byte("10"), 2)
+	_ = wal.WriteEntry(proto.Command_DELETE, "b", nil, 3)
+
+	_, err = wal.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("failed to create snapshot: %v", err)
+	}
+
+	// Stream from latest snapshot (no path argument)
+	lastTerm, lastIdx, ch, err := wal.StreamSnapshot()
+	if err != nil {
+		t.Fatalf("unexpected error streaming snapshot: %v", err)
+	}
+
+	if lastTerm != 3 || lastIdx != 5 {
+		t.Fatalf("expected lastIncludedTerm=3, lastIncludedIndex=5; got term=%d, index=%d", lastTerm, lastIdx)
+	}
+
+	var streamed []*proto.KVPair
+	for kv := range ch {
+		streamed = append(streamed, kv)
+	}
+
+	// Verify that channel is closed
+	if _, open := <-ch; open {
+		t.Fatalf("expected stream channel to be closed after reading all entries")
+	}
+
+	// Active keys in snapshot should be "a"="10" and "c"="3" (b was deleted)
+	if len(streamed) != 2 {
+		t.Fatalf("expected 2 streamed KVPairs, got %d: %+v", len(streamed), streamed)
+	}
+	if streamed[0].Key != "a" || streamed[0].GetValue() != "10" || streamed[0].Command != proto.Command_PUT {
+		t.Fatalf("unexpected first entry: %+v", streamed[0])
+	}
+	if streamed[1].Key != "c" || streamed[1].GetValue() != "3" || streamed[1].Command != proto.Command_PUT {
+		t.Fatalf("unexpected second entry: %+v", streamed[1])
+	}
+
+	// Verify streaming from a reopened WAL on disk (no path argument)
+	wal2, err := OpenWAL(tempDir, false, 1024*1024, 10)
 	if err != nil {
 		t.Fatalf("failed to reopen wal: %v", err)
 	}
-	defer reopened.Close()
+	defer wal2.Close()
 
-	if reopened.CurrSequenceNo < 4 {
-		t.Fatalf("expected CurrSequenceNo >= 4 after recovery, got %d", reopened.CurrSequenceNo)
+	lastTerm2, lastIdx2, ch2, err := wal2.StreamSnapshot()
+	if err != nil {
+		t.Fatalf("unexpected error streaming snapshot from reopened wal: %v", err)
+	}
+	if lastTerm2 != 3 || lastIdx2 != 5 {
+		t.Fatalf("expected term 3 index 5, got %d, %d", lastTerm2, lastIdx2)
+	}
+
+	count := 0
+	for range ch2 {
+		count++
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 items, got %d", count)
 	}
 }

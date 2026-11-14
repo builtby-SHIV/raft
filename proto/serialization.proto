@@ -10,16 +10,8 @@ enum Command {
 
 message KVPair {
     string Key = 1;
-    string Value = 2;
+    optional string Value = 2;
     Command command = 3;
-}
-
-message WALEntry {  
-    uint64 Index = 1;
-    string key = 2;
-    optional bytes value = 3;
-    uint32  CRC = 4;
-    Command command = 5;
 }
 
 message RaftLog {
@@ -45,6 +37,16 @@ message AppendEntriesReply {
     uint64 ConflictIndex = 2;
     uint64 ConflictTerm = 3;
     bool Success = 4;
+}
+
+message InstallSnapShotArgs {
+    uint64 term = 1;
+    uint64 leaderId = 2;
+    uint64 lastIncludedIndex = 3;
+    uint64 lastIncludedTerm = 4;
+    uint64 offset = 5;
+    repeated KVPair data = 6;
+    bool done = 7;
 }
 
 message RequestVoteArgs {

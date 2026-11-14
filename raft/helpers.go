@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	TypeAppendEntries      byte = 1
-	TypeRequestVote        byte = 2
-	TypeAppendEntriesReply byte = 3
-	TypeRequestVoteReply   byte = 4
+	TypeAppendEntries		byte = 1
+	TypeRequestVote			byte = 2
+	TypeAppendEntriesReply	byte = 3
+	TypeRequestVoteReply	byte = 4
+	TypeInstallSnapShot		byte = 5
 )
 
 const MaxPayloadSize uint64 = 16 * 1024 * 1024
@@ -73,6 +74,8 @@ func DecodeAndReadMessage(r io.Reader) (msgType byte, msg googleproto.Message, e
 		msg = &proto.AppendEntriesReply{}
 	case TypeRequestVoteReply:
 		msg = &proto.RequestVoteReply{}
+	case TypeInstallSnapShot:
+		msg = &proto.InstallSnapShotArgs{}
 	default:
 		return msgType, nil, fmt.Errorf("%w: %d", ErrUnknownMessageType, msgType)
 	}
@@ -103,6 +106,5 @@ func NewLeaderState() *LeaderState {
 		nextIndex:  make(map[string]uint64),
 		matchIndex: make(map[string]uint64),
 		inflight:   make(map[string]bool),
-		pending:    make(map[uint64]chan result),
 	}
 }

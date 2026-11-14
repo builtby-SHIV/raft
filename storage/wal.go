@@ -3,21 +3,17 @@ package storage
 import (
 	"bufio"
 	"cmp"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
-	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	googleproto "google.golang.org/protobuf/proto"
 	"raft/proto"
@@ -31,27 +27,24 @@ type WAL struct {
 	PrevLogTerm         uint64
 	CurrSequenceNo      uint64
 	lastSnapshotIndex   uint64
-	snapshotThreshold   uint64
+	lastSnapshotPath    string
 	bufWriter           *bufio.Writer
-	syncTimer           *time.Timer
 	shouldFsync         bool
 	maxFileSize         int64
 	maxSegments         int64
 	currentSegmentIndex int64
-	ctx                 context.Context
-	cancel              context.CancelFunc
 }
 
 var (
 	ErrOpenAndCreateWAL = errors.New("cannot open or create log file")
 	FileNotFound        = errors.New("log file not found")
 	ErrCorruptedEntry   = errors.New("CRC mismatch, data might be corrupted")
+	ErrCompacted        = errors.New("requested entries have been compacted into snapshot")
 )
 
 const (
-	syncInterval             = 200 * time.Millisecond
-	segmentPrefix            = "segment-"
-	DefaultSnapshotThreshold = uint64(10000)
+	segmentPrefix     = "segment-"
+	SnapshotThreshold = uint64(10000)
 )
 
 func OpenWAL(directory string, enableFsync bool, maxFileSize int64, maxSegments int64) (*WAL, error) {
@@ -97,23 +90,17 @@ func OpenWAL(directory string, enableFsync bool, maxFileSize int64, maxSegments 
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	wal := &WAL{
 		directory:           directory,
 		snapshotsDir:        snapshotsDir,
 		currentSegment:      file,
 		CurrSequenceNo:      0,
 		lastSnapshotIndex:   0,
-		snapshotThreshold:   DefaultSnapshotThreshold,
 		bufWriter:           bufio.NewWriter(file),
-		syncTimer:           time.NewTimer(syncInterval),
 		shouldFsync:         enableFsync,
 		maxFileSize:         maxFileSize,
 		maxSegments:         maxSegments,
 		currentSegmentIndex: lastSegmentID,
-		ctx:                 ctx,
-		cancel:              cancel,
 	}
 
 	if lastSnapIdx, lastSnapTerm, err := wal.getLatestSnapshotMetadata(); err == nil && lastSnapIdx > 0 {
@@ -135,31 +122,7 @@ func OpenWAL(directory string, enableFsync bool, maxFileSize int64, maxSegments 
 		wal.PrevLogTerm = lastEntry.Term
 	}
 
-	go wal.keepSyncing()
-
 	return wal, nil
-}
-
-func (w *WAL) SnapshotsDirectory() string {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-	return w.snapshotsDir
-}
-
-func (w *WAL) SetSnapshotsDirectory(dir string) error {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	w.snapshotsDir = dir
-	return nil
-}
-
-func (w *WAL) SetSnapshotThreshold(threshold uint64) {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-	w.snapshotThreshold = threshold
 }
 
 func findLastSegmentIndexinFiles(files []string) (int64, error) {
@@ -242,55 +205,7 @@ func (w *WAL) WriteEntry(cmd proto.Command, key string, val []byte, term uint64)
 	w.CurrSequenceNo = nextSeq
 	w.PrevLogTerm = term
 
-	if w.snapshotThreshold > 0 && (w.CurrSequenceNo-w.lastSnapshotIndex) >= w.snapshotThreshold {
-		if err := w.createSnapshotLocked(); err != nil {
-			return fmt.Errorf("creating snapshot: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (w *WAL) AppendEntry(entry *proto.RaftLog) error {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-
-	if err := w.rotateIfNeeded(); err != nil {
-		return err
-	}
-
-	if entry.Index == 0 {
-		entry.Index = w.CurrSequenceNo + 1
-	}
-	if entry.CRC == 0 {
-		entry.CRC = calculateCRC(entry.GetValue(), entry.GetIndex())
-	}
-
-	data := proto.MustMarshal(entry)
-
-	if err := binary.Write(w.bufWriter, binary.LittleEndian, int64(len(data))); err != nil {
-		return err
-	}
-	if _, err := w.bufWriter.Write(data); err != nil {
-		return err
-	}
-
-	if err := w.bufWriter.Flush(); err != nil {
-		return err
-	}
-
-	if w.shouldFsync {
-		if err := w.currentSegment.Sync(); err != nil {
-			return err
-		}
-	}
-
-	if entry.Index > w.CurrSequenceNo {
-		w.CurrSequenceNo = entry.Index
-	}
-	w.PrevLogTerm = entry.Term
-
-	if w.snapshotThreshold > 0 && (w.CurrSequenceNo-w.lastSnapshotIndex) >= w.snapshotThreshold {
+	if (w.CurrSequenceNo - w.lastSnapshotIndex) >= SnapshotThreshold {
 		if err := w.createSnapshotLocked(); err != nil {
 			return fmt.Errorf("creating snapshot: %w", err)
 		}
@@ -378,13 +293,11 @@ func (w *WAL) createSnapshotFileLocked() (string, error) {
 
 	for _, k := range keys {
 		val := kvMap[k]
-		snapEntry := &proto.RaftLog{
-			Index:   lastIndex,
-			Term:    lastTerm,
+		strVal := string(val)
+		snapEntry := &proto.KVPair{
 			Key:     k,
-			Value:   val,
+			Value:   &strVal,
 			Command: proto.Command_PUT,
-			CRC:     calculateCRC(val, lastIndex),
 		}
 		data := proto.MustMarshal(snapEntry)
 		if err := binary.Write(tempFile, binary.LittleEndian, int64(len(data))); err != nil {
@@ -413,6 +326,7 @@ func (w *WAL) createSnapshotFileLocked() (string, error) {
 	}
 
 	w.lastSnapshotIndex = lastIndex
+	w.lastSnapshotPath = targetFilePath
 	return targetFilePath, nil
 }
 
@@ -422,18 +336,15 @@ func (w *WAL) getLatestSnapshotMetadata() (uint64, uint64, error) {
 		return 0, 0, nil
 	}
 
-	var maxIndex uint64
+	var maxIndex int64 = -1
 	var latestFile string
 	for _, f := range files {
 		base := filepath.Base(f)
-		if strings.HasSuffix(base, ".tmp") {
-			continue
-		}
-		if !strings.HasPrefix(base, "snapshot-") {
+		if strings.HasSuffix(base, ".tmp") || !strings.HasPrefix(base, "snapshot-") {
 			continue
 		}
 		idxStr := strings.TrimPrefix(base, "snapshot-")
-		idx, err := strconv.ParseUint(idxStr, 10, 64)
+		idx, err := strconv.ParseInt(idxStr, 10, 64)
 		if err != nil {
 			continue
 		}
@@ -446,16 +357,9 @@ func (w *WAL) getLatestSnapshotMetadata() (uint64, uint64, error) {
 	if latestFile == "" {
 		return 0, 0, nil
 	}
+	w.lastSnapshotPath = latestFile
 
-	idx, term, err := ReadSnapshotMetadata(latestFile)
-	if err != nil {
-		return 0, 0, err
-	}
-	return idx, term, nil
-}
-
-func ReadSnapshotMetadata(filePath string) (uint64, uint64, error) {
-	file, err := os.OpenFile(filePath, os.O_RDONLY, 0644)
+	file, err := os.OpenFile(latestFile, os.O_RDONLY, 0644)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -463,34 +367,12 @@ func ReadSnapshotMetadata(filePath string) (uint64, uint64, error) {
 
 	var lastIndex, lastTerm uint64
 	if err := binary.Read(file, binary.LittleEndian, &lastIndex); err != nil {
-		return 0, 0, fmt.Errorf("reading lastIndex: %w", err)
+		return 0, 0, err
 	}
 	if err := binary.Read(file, binary.LittleEndian, &lastTerm); err != nil {
-		return 0, 0, fmt.Errorf("reading lastTerm: %w", err)
+		return 0, 0, err
 	}
 	return lastIndex, lastTerm, nil
-}
-
-func ReadSnapshot(filePath string) (uint64, uint64, []*proto.RaftLog, error) {
-	file, err := os.OpenFile(filePath, os.O_RDONLY, 0644)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	defer file.Close()
-
-	var lastIndex, lastTerm uint64
-	if err := binary.Read(file, binary.LittleEndian, &lastIndex); err != nil {
-		return 0, 0, nil, fmt.Errorf("reading lastIndex: %w", err)
-	}
-	if err := binary.Read(file, binary.LittleEndian, &lastTerm); err != nil {
-		return 0, 0, nil, fmt.Errorf("reading lastTerm: %w", err)
-	}
-
-	entries, err := readAllRaftLogEntriesFromFile(file)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	return lastIndex, lastTerm, entries, nil
 }
 
 func (w *WAL) rotateIfNeeded() error {
@@ -509,8 +391,13 @@ func (w *WAL) rotateIfNeeded() error {
 }
 
 func (w *WAL) rotateLog() error {
-	if err := w.sync(); err != nil {
+	if err := w.bufWriter.Flush(); err != nil {
 		return err
+	}
+	if w.shouldFsync {
+		if err := w.currentSegment.Sync(); err != nil {
+			return err
+		}
 	}
 
 	if err := w.currentSegment.Close(); err != nil {
@@ -525,62 +412,10 @@ func (w *WAL) rotateLog() error {
 	w.currentSegment = newFile
 	w.bufWriter = bufio.NewWriter(newFile)
 
-	files, err := filepath.Glob(filepath.Join(w.directory, segmentPrefix+"*"))
-	if err == nil && int64(len(files)) > w.maxSegments {
-		_ = w.deleteOldestSegment()
-	}
-
 	return nil
 }
 
-func (w *WAL) deleteOldestSegment() error {
-	files, err := filepath.Glob(filepath.Join(w.directory, segmentPrefix+"*"))
-	if err != nil || len(files) == 0 {
-		return err
-	}
-
-	oldestSegmentFilePath, err := w.findOldestSegmentFile(files)
-	if err != nil {
-		return err
-	}
-
-	if oldestSegmentFilePath == w.currentSegment.Name() {
-		return nil
-	}
-
-	return os.Remove(oldestSegmentFilePath)
-}
-
-func (w *WAL) findOldestSegmentFile(files []string) (string, error) {
-	var oldestSegment string
-	oldestSegmentID := int64(math.MaxInt64)
-
-	for _, file := range files {
-		fileName := filepath.Base(file)
-		if !strings.HasPrefix(fileName, segmentPrefix) || strings.HasSuffix(fileName, ".tmp") {
-			continue
-		}
-		segmentID, err := strconv.ParseInt(strings.TrimPrefix(fileName, segmentPrefix), 10, 64)
-		if err != nil {
-			continue
-		}
-		if segmentID < oldestSegmentID {
-			oldestSegmentID = segmentID
-			oldestSegment = file
-		}
-	}
-
-	if oldestSegment == "" {
-		return "", errors.New("no valid segment found")
-	}
-
-	return oldestSegment, nil
-}
-
 func (w *WAL) Close() error {
-	w.cancel()
-	w.syncTimer.Stop()
-
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
@@ -594,10 +429,14 @@ func (w *WAL) Close() error {
 	return w.currentSegment.Close()
 }
 
-func (wal *WAL) getLastSequenceNo() (uint64, error) {
+func (wal *WAL) getLastLogEntryLocked() (*proto.RaftLog, error) {
+	if wal.bufWriter != nil {
+		_ = wal.bufWriter.Flush()
+	}
+
 	files, err := filepath.Glob(filepath.Join(wal.directory, segmentPrefix+"*"))
 	if err != nil || len(files) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 
 	type segInfo struct {
@@ -618,7 +457,7 @@ func (wal *WAL) getLastSequenceNo() (uint64, error) {
 	}
 
 	slices.SortFunc(segs, func(a, b segInfo) int {
-		return cmp.Compare(b.id, a.id)
+		return cmp.Compare(b.id, a.id) // descending order to find last entry from newest segment
 	})
 
 	for _, seg := range segs {
@@ -629,11 +468,86 @@ func (wal *WAL) getLastSequenceNo() (uint64, error) {
 		entry, err := wal.getLastEntryInFile(file)
 		_ = file.Close()
 		if err == nil && entry != nil {
-			return entry.GetIndex(), nil
+			return entry, nil
 		}
 	}
 
-	return 0, nil
+	return nil, nil
+}
+
+func (wal *WAL) getFirstLogEntryLocked() (*proto.RaftLog, error) {
+	if wal.bufWriter != nil {
+		_ = wal.bufWriter.Flush()
+	}
+
+	files, err := filepath.Glob(filepath.Join(wal.directory, segmentPrefix+"*"))
+	if err != nil || len(files) == 0 {
+		return nil, nil
+	}
+
+	type segInfo struct {
+		id   int64
+		path string
+	}
+	var segs []segInfo
+	for _, f := range files {
+		base := filepath.Base(f)
+		if !strings.HasPrefix(base, segmentPrefix) || strings.HasSuffix(base, ".tmp") {
+			continue
+		}
+		id, err := strconv.ParseInt(strings.TrimPrefix(base, segmentPrefix), 10, 64)
+		if err != nil {
+			continue
+		}
+		segs = append(segs, segInfo{id: id, path: f})
+	}
+
+	slices.SortFunc(segs, func(a, b segInfo) int {
+		return cmp.Compare(a.id, b.id) // ascending order to find first entry from oldest segment
+	})
+
+	for _, seg := range segs {
+		file, err := os.OpenFile(seg.path, os.O_RDONLY, 0644)
+		if err != nil {
+			continue
+		}
+		entry, err := wal.getFirstEntryInFile(file)
+		_ = file.Close()
+		if err == nil && entry != nil {
+			return entry, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (wal *WAL) getLastSequenceNo() (uint64, error) {
+	entry, err := wal.getLastLogEntryLocked()
+	if err != nil || entry == nil {
+		return 0, err
+	}
+	return entry.GetIndex(), nil
+}
+
+func (wal *WAL) getFirstEntryInFile(file *os.File) (*proto.RaftLog, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	var size int64
+	if err := binary.Read(file, binary.LittleEndian, &size); err != nil {
+		if err == io.EOF {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if size <= 0 {
+		return nil, nil
+	}
+	data := make([]byte, size)
+	if _, err := io.ReadFull(file, data); err != nil {
+		return nil, err
+	}
+	return unmarshalAndVerify(data)
 }
 
 func (wal *WAL) getLastEntryInFile(file *os.File) (*proto.RaftLog, error) {
@@ -675,20 +589,7 @@ func (wal *WAL) getLastEntryInFile(file *os.File) (*proto.RaftLog, error) {
 	}
 }
 
-func (wal *WAL) GetLastEntryInLog() (*proto.RaftLog, error) {
-	wal.lock.Lock()
-	defer wal.lock.Unlock()
-	_ = wal.bufWriter.Flush()
-
-	file, err := os.OpenFile(wal.currentSegment.Name(), os.O_RDONLY, 0644)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	return wal.getLastEntryInFile(file)
-}
-
-func readAllRaftLogEntriesFromFile(file *os.File) ([]*proto.RaftLog, error) {
+func (w *WAL) ReadAllEntries(file *os.File) ([]*proto.RaftLog, error) {
 	var entries []*proto.RaftLog
 	var size int64
 
@@ -715,10 +616,6 @@ func readAllRaftLogEntriesFromFile(file *os.File) ([]*proto.RaftLog, error) {
 	}
 
 	return entries, nil
-}
-
-func (w *WAL) ReadAllEntries(file *os.File) ([]*proto.RaftLog, error) {
-	return readAllRaftLogEntriesFromFile(file)
 }
 
 func unmarshalAndVerify(data []byte) (*proto.RaftLog, error) {
@@ -779,7 +676,7 @@ func (w *WAL) readAllFromOffsetLocked(offset int) ([]*proto.RaftLog, error) {
 			return nil, err
 		}
 
-		entriesFromSegment, err := readAllRaftLogEntriesFromFile(file)
+		entriesFromSegment, err := w.ReadAllEntries(file)
 		_ = file.Close()
 		if err != nil {
 			return entries, err
@@ -789,41 +686,6 @@ func (w *WAL) readAllFromOffsetLocked(offset int) ([]*proto.RaftLog, error) {
 	}
 
 	return entries, nil
-}
-
-func (wal *WAL) sync() error {
-	if err := wal.bufWriter.Flush(); err != nil {
-		return err
-	}
-	if wal.shouldFsync {
-		if err := wal.currentSegment.Sync(); err != nil {
-			return err
-		}
-	}
-
-	wal.resetTimer()
-	return nil
-}
-
-func (wal *WAL) resetTimer() {
-	wal.syncTimer.Reset(syncInterval)
-}
-
-func (wal *WAL) keepSyncing() {
-	for {
-		select {
-		case <-wal.syncTimer.C:
-			wal.lock.Lock()
-			err := wal.sync()
-			wal.lock.Unlock()
-			if err != nil {
-				log.Printf("Error while performing sync: %v", err)
-			}
-
-		case <-wal.ctx.Done():
-			return
-		}
-	}
 }
 
 func (wal *WAL) Repair(idx uint64) ([]*proto.RaftLog, error) {
@@ -944,7 +806,7 @@ func (wal *WAL) replaceWithFixedFile(targetFilePath string, entries []*proto.Raf
 		wal.CurrSequenceNo = entries[len(entries)-1].Index
 		wal.PrevLogTerm = entries[len(entries)-1].Term
 	} else {
-		wal.CurrSequenceNo = 0
+		wal.CurrSequenceNo = wal.lastSnapshotIndex
 	}
 
 	return nil
@@ -987,4 +849,201 @@ func (w *WAL) RaftLogTerm(idx uint64) (uint64, error) {
 	}
 
 	return 0, nil
+}
+
+func (w *WAL) GetLastTermAndIndex() (term uint64, index uint64, err error) {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	entry, err := w.getLastLogEntryLocked()
+	if err != nil {
+		return 0, 0, err
+	}
+	if entry != nil {
+		return entry.Term, entry.Index, nil
+	}
+
+	snapIdx, snapTerm, err := w.getLatestSnapshotMetadata()
+	if err != nil {
+		return 0, 0, err
+	}
+	return snapTerm, snapIdx, nil
+}
+
+func (w *WAL) GetFirstTermAndIndex() (term uint64, index uint64, err error) {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	snapIdx, snapTerm, err := w.getLatestSnapshotMetadata()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	entry, err := w.getFirstLogEntryLocked()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if snapIdx > 0 {
+		if entry != nil && entry.Index > snapIdx {
+			return entry.Term, entry.Index, nil
+		}
+		allEntries, err := w.readAllFromOffsetLocked(-1)
+		if err == nil {
+			for _, e := range allEntries {
+				if e.Index > snapIdx {
+					return e.Term, e.Index, nil
+				}
+			}
+		}
+		return snapTerm, snapIdx + 1, nil
+	}
+
+	if entry != nil {
+		return entry.Term, entry.Index, nil
+	}
+
+	return 0, 0, nil
+}
+
+func (w *WAL) GetEntriesFrom(startIndex uint64) (entries []*proto.KVPair, prevIndex uint64, prevTerm uint64, err error) {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	if w.bufWriter != nil {
+		_ = w.bufWriter.Flush()
+	}
+
+	allEntries, err := w.readAllFromOffsetLocked(-1)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	if startIndex <= 1 {
+		prevIndex = 0
+		prevTerm = 0
+	} else {
+		prevIndex = startIndex - 1
+		found := false
+
+		// Check active log entries
+		for _, entry := range allEntries {
+			if entry.Index == prevIndex {
+				prevTerm = entry.Term
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// Check if prevIndex corresponds to the latest snapshot
+			snapIdx, snapTerm, snapErr := w.getLatestSnapshotMetadata()
+			if snapErr == nil && snapIdx > 0 {
+				if prevIndex == snapIdx {
+					prevTerm = snapTerm
+					found = true
+				} else if prevIndex < snapIdx {
+					return nil, prevIndex, snapTerm, ErrCompacted
+				}
+			}
+		}
+
+		if !found && prevIndex == w.lastSnapshotIndex && w.lastSnapshotIndex > 0 {
+			prevTerm = w.PrevLogTerm
+			found = true
+		}
+	}
+
+	for _, entry := range allEntries {
+		if entry.Index >= startIndex {
+			var valPtr *string
+			if entry.Value != nil {
+				strVal := string(entry.Value)
+				valPtr = &strVal
+			}
+			entries = append(entries, &proto.KVPair{
+				Key:     entry.Key,
+				Value:   valPtr,
+				Command: entry.Command,
+			})
+		}
+	}
+	if entries == nil {
+		entries = []*proto.KVPair{}
+	}
+
+	return entries, prevIndex, prevTerm, nil
+}
+
+func (w *WAL) StreamSnapshot() (lastIncludedTerm uint64, lastIncludedIndex uint64, entries <-chan *proto.KVPair, err error) {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	targetPath := w.lastSnapshotPath
+	if targetPath == "" {
+		files, err := filepath.Glob(filepath.Join(w.snapshotsDir, "snapshot-*"))
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		var maxIndex int64 = -1
+		for _, f := range files {
+			base := filepath.Base(f)
+			if strings.HasSuffix(base, ".tmp") || !strings.HasPrefix(base, "snapshot-") {
+				continue
+			}
+			idxStr := strings.TrimPrefix(base, "snapshot-")
+			idx, err := strconv.ParseInt(idxStr, 10, 64)
+			if err != nil {
+				continue
+			}
+			if idx > maxIndex {
+				maxIndex = idx
+				targetPath = f
+			}
+		}
+		w.lastSnapshotPath = targetPath
+	}
+
+	if targetPath == "" {
+		return 0, 0, nil, errors.New("no snapshot found")
+	}
+
+	file, err := os.Open(targetPath)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+
+	if err := binary.Read(file, binary.LittleEndian, &lastIncludedIndex); err != nil {
+		_ = file.Close()
+		return 0, 0, nil, fmt.Errorf("reading lastIncludedIndex: %w", err)
+	}
+	if err := binary.Read(file, binary.LittleEndian, &lastIncludedTerm); err != nil {
+		_ = file.Close()
+		return 0, 0, nil, fmt.Errorf("reading lastIncludedTerm: %w", err)
+	}
+
+	ch := make(chan *proto.KVPair, 64)
+	go func() {
+		defer file.Close()
+		defer close(ch)
+
+		for {
+			var size int64
+			if err := binary.Read(file, binary.LittleEndian, &size); err != nil {
+				break
+			}
+			data := make([]byte, size)
+			if _, err := io.ReadFull(file, data); err != nil {
+				break
+			}
+
+			var kv proto.KVPair
+			if err := googleproto.Unmarshal(data, &kv); err != nil {
+				break
+			}
+			ch <- &kv
+		}
+	}()
+
+	return lastIncludedTerm, lastIncludedIndex, ch, nil
 }
