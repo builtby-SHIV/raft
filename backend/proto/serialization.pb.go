@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        v7.36.0
-// source: serialization.proto
+// source: proto/serialization.proto
 
 package proto
 
@@ -54,11 +54,11 @@ func (x Command) String() string {
 }
 
 func (Command) Descriptor() protoreflect.EnumDescriptor {
-	return file_serialization_proto_enumTypes[0].Descriptor()
+	return file_proto_serialization_proto_enumTypes[0].Descriptor()
 }
 
 func (Command) Type() protoreflect.EnumType {
-	return &file_serialization_proto_enumTypes[0]
+	return &file_proto_serialization_proto_enumTypes[0]
 }
 
 func (x Command) Number() protoreflect.EnumNumber {
@@ -67,21 +67,23 @@ func (x Command) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Command.Descriptor instead.
 func (Command) EnumDescriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{0}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{0}
 }
 
 type KVPair struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=Key,proto3" json:"Key,omitempty"`
-	Value         *string                `protobuf:"bytes,2,opt,name=Value,proto3,oneof" json:"Value,omitempty"`
-	Command       Command                `protobuf:"varint,3,opt,name=command,proto3,enum=proto.Command" json:"command,omitempty"`
+	Term          uint64                 `protobuf:"varint,1,opt,name=Term,proto3" json:"Term,omitempty"`
+	Index         uint64                 `protobuf:"varint,2,opt,name=Index,proto3" json:"Index,omitempty"`
+	Key           string                 `protobuf:"bytes,3,opt,name=Key,proto3" json:"Key,omitempty"`
+	Value         *string                `protobuf:"bytes,4,opt,name=Value,proto3,oneof" json:"Value,omitempty"`
+	Command       Command                `protobuf:"varint,5,opt,name=command,proto3,enum=proto.Command" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *KVPair) Reset() {
 	*x = KVPair{}
-	mi := &file_serialization_proto_msgTypes[0]
+	mi := &file_proto_serialization_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -93,7 +95,7 @@ func (x *KVPair) String() string {
 func (*KVPair) ProtoMessage() {}
 
 func (x *KVPair) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[0]
+	mi := &file_proto_serialization_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -106,7 +108,21 @@ func (x *KVPair) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KVPair.ProtoReflect.Descriptor instead.
 func (*KVPair) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{0}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *KVPair) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *KVPair) GetIndex() uint64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
 }
 
 func (x *KVPair) GetKey() string {
@@ -144,7 +160,7 @@ type RaftLog struct {
 
 func (x *RaftLog) Reset() {
 	*x = RaftLog{}
-	mi := &file_serialization_proto_msgTypes[1]
+	mi := &file_proto_serialization_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -156,7 +172,7 @@ func (x *RaftLog) String() string {
 func (*RaftLog) ProtoMessage() {}
 
 func (x *RaftLog) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[1]
+	mi := &file_proto_serialization_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -169,7 +185,7 @@ func (x *RaftLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RaftLog.ProtoReflect.Descriptor instead.
 func (*RaftLog) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{1}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RaftLog) GetIndex() uint64 {
@@ -228,7 +244,7 @@ type AppendEntriesArgs struct {
 
 func (x *AppendEntriesArgs) Reset() {
 	*x = AppendEntriesArgs{}
-	mi := &file_serialization_proto_msgTypes[2]
+	mi := &file_proto_serialization_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -240,7 +256,7 @@ func (x *AppendEntriesArgs) String() string {
 func (*AppendEntriesArgs) ProtoMessage() {}
 
 func (x *AppendEntriesArgs) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[2]
+	mi := &file_proto_serialization_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -253,7 +269,7 @@ func (x *AppendEntriesArgs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEntriesArgs.ProtoReflect.Descriptor instead.
 func (*AppendEntriesArgs) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{2}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AppendEntriesArgs) GetTerm() uint64 {
@@ -310,7 +326,7 @@ type AppendEntriesReply struct {
 
 func (x *AppendEntriesReply) Reset() {
 	*x = AppendEntriesReply{}
-	mi := &file_serialization_proto_msgTypes[3]
+	mi := &file_proto_serialization_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +338,7 @@ func (x *AppendEntriesReply) String() string {
 func (*AppendEntriesReply) ProtoMessage() {}
 
 func (x *AppendEntriesReply) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[3]
+	mi := &file_proto_serialization_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +351,7 @@ func (x *AppendEntriesReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendEntriesReply.ProtoReflect.Descriptor instead.
 func (*AppendEntriesReply) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{3}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AppendEntriesReply) GetTerm() uint64 {
@@ -373,7 +389,7 @@ type InstallSnapShotArgs struct {
 	LastIncludedIndex uint64                 `protobuf:"varint,3,opt,name=lastIncludedIndex,proto3" json:"lastIncludedIndex,omitempty"`
 	LastIncludedTerm  uint64                 `protobuf:"varint,4,opt,name=lastIncludedTerm,proto3" json:"lastIncludedTerm,omitempty"`
 	Offset            uint64                 `protobuf:"varint,5,opt,name=offset,proto3" json:"offset,omitempty"`
-	Data              []*KVPair              `protobuf:"bytes,6,rep,name=data,proto3" json:"data,omitempty"`
+	Data              []byte                 `protobuf:"bytes,6,opt,name=data,proto3" json:"data,omitempty"`
 	Done              bool                   `protobuf:"varint,7,opt,name=done,proto3" json:"done,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -381,7 +397,7 @@ type InstallSnapShotArgs struct {
 
 func (x *InstallSnapShotArgs) Reset() {
 	*x = InstallSnapShotArgs{}
-	mi := &file_serialization_proto_msgTypes[4]
+	mi := &file_proto_serialization_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +409,7 @@ func (x *InstallSnapShotArgs) String() string {
 func (*InstallSnapShotArgs) ProtoMessage() {}
 
 func (x *InstallSnapShotArgs) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[4]
+	mi := &file_proto_serialization_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +422,7 @@ func (x *InstallSnapShotArgs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallSnapShotArgs.ProtoReflect.Descriptor instead.
 func (*InstallSnapShotArgs) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{4}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *InstallSnapShotArgs) GetTerm() uint64 {
@@ -444,7 +460,7 @@ func (x *InstallSnapShotArgs) GetOffset() uint64 {
 	return 0
 }
 
-func (x *InstallSnapShotArgs) GetData() []*KVPair {
+func (x *InstallSnapShotArgs) GetData() []byte {
 	if x != nil {
 		return x.Data
 	}
@@ -452,6 +468,74 @@ func (x *InstallSnapShotArgs) GetData() []*KVPair {
 }
 
 func (x *InstallSnapShotArgs) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+type InstallSnapShotReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Term          uint64                 `protobuf:"varint,1,opt,name=Term,proto3" json:"Term,omitempty"`
+	Offset        uint64                 `protobuf:"varint,2,opt,name=Offset,proto3" json:"Offset,omitempty"`
+	Success       bool                   `protobuf:"varint,3,opt,name=Success,proto3" json:"Success,omitempty"`
+	Done          bool                   `protobuf:"varint,4,opt,name=Done,proto3" json:"Done,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallSnapShotReply) Reset() {
+	*x = InstallSnapShotReply{}
+	mi := &file_proto_serialization_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallSnapShotReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallSnapShotReply) ProtoMessage() {}
+
+func (x *InstallSnapShotReply) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_serialization_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallSnapShotReply.ProtoReflect.Descriptor instead.
+func (*InstallSnapShotReply) Descriptor() ([]byte, []int) {
+	return file_proto_serialization_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *InstallSnapShotReply) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *InstallSnapShotReply) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *InstallSnapShotReply) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *InstallSnapShotReply) GetDone() bool {
 	if x != nil {
 		return x.Done
 	}
@@ -470,7 +554,7 @@ type RequestVoteArgs struct {
 
 func (x *RequestVoteArgs) Reset() {
 	*x = RequestVoteArgs{}
-	mi := &file_serialization_proto_msgTypes[5]
+	mi := &file_proto_serialization_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -482,7 +566,7 @@ func (x *RequestVoteArgs) String() string {
 func (*RequestVoteArgs) ProtoMessage() {}
 
 func (x *RequestVoteArgs) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[5]
+	mi := &file_proto_serialization_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -495,7 +579,7 @@ func (x *RequestVoteArgs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestVoteArgs.ProtoReflect.Descriptor instead.
 func (*RequestVoteArgs) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{5}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RequestVoteArgs) GetTerm() uint64 {
@@ -536,7 +620,7 @@ type RequestVoteReply struct {
 
 func (x *RequestVoteReply) Reset() {
 	*x = RequestVoteReply{}
-	mi := &file_serialization_proto_msgTypes[6]
+	mi := &file_proto_serialization_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +632,7 @@ func (x *RequestVoteReply) String() string {
 func (*RequestVoteReply) ProtoMessage() {}
 
 func (x *RequestVoteReply) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[6]
+	mi := &file_proto_serialization_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +645,7 @@ func (x *RequestVoteReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestVoteReply.ProtoReflect.Descriptor instead.
 func (*RequestVoteReply) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{6}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RequestVoteReply) GetTerm() uint64 {
@@ -588,7 +672,7 @@ type RaftState struct {
 
 func (x *RaftState) Reset() {
 	*x = RaftState{}
-	mi := &file_serialization_proto_msgTypes[7]
+	mi := &file_proto_serialization_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +684,7 @@ func (x *RaftState) String() string {
 func (*RaftState) ProtoMessage() {}
 
 func (x *RaftState) ProtoReflect() protoreflect.Message {
-	mi := &file_serialization_proto_msgTypes[7]
+	mi := &file_proto_serialization_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +697,7 @@ func (x *RaftState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RaftState.ProtoReflect.Descriptor instead.
 func (*RaftState) Descriptor() ([]byte, []int) {
-	return file_serialization_proto_rawDescGZIP(), []int{7}
+	return file_proto_serialization_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RaftState) GetTerm() uint64 {
@@ -630,15 +714,17 @@ func (x *RaftState) GetVotedFor() string {
 	return ""
 }
 
-var File_serialization_proto protoreflect.FileDescriptor
+var File_proto_serialization_proto protoreflect.FileDescriptor
 
-const file_serialization_proto_rawDesc = "" +
+const file_proto_serialization_proto_rawDesc = "" +
 	"\n" +
-	"\x13serialization.proto\x12\x05proto\"i\n" +
-	"\x06KVPair\x12\x10\n" +
-	"\x03Key\x18\x01 \x01(\tR\x03Key\x12\x19\n" +
-	"\x05Value\x18\x02 \x01(\tH\x00R\x05Value\x88\x01\x01\x12(\n" +
-	"\acommand\x18\x03 \x01(\x0e2\x0e.proto.CommandR\acommandB\b\n" +
+	"\x19proto/serialization.proto\x12\x05proto\"\x93\x01\n" +
+	"\x06KVPair\x12\x12\n" +
+	"\x04Term\x18\x01 \x01(\x04R\x04Term\x12\x14\n" +
+	"\x05Index\x18\x02 \x01(\x04R\x05Index\x12\x10\n" +
+	"\x03Key\x18\x03 \x01(\tR\x03Key\x12\x19\n" +
+	"\x05Value\x18\x04 \x01(\tH\x00R\x05Value\x88\x01\x01\x12(\n" +
+	"\acommand\x18\x05 \x01(\x0e2\x0e.proto.CommandR\acommandB\b\n" +
 	"\x06_Value\"\xa6\x01\n" +
 	"\aRaftLog\x12\x14\n" +
 	"\x05Index\x18\x01 \x01(\x04R\x05Index\x12\x12\n" +
@@ -659,15 +745,20 @@ const file_serialization_proto_rawDesc = "" +
 	"\x04Term\x18\x01 \x01(\x04R\x04Term\x12$\n" +
 	"\rConflictIndex\x18\x02 \x01(\x04R\rConflictIndex\x12\"\n" +
 	"\fConflictTerm\x18\x03 \x01(\x04R\fConflictTerm\x12\x18\n" +
-	"\aSuccess\x18\x04 \x01(\bR\aSuccess\"\xee\x01\n" +
+	"\aSuccess\x18\x04 \x01(\bR\aSuccess\"\xdf\x01\n" +
 	"\x13InstallSnapShotArgs\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x1a\n" +
 	"\bleaderId\x18\x02 \x01(\x04R\bleaderId\x12,\n" +
 	"\x11lastIncludedIndex\x18\x03 \x01(\x04R\x11lastIncludedIndex\x12*\n" +
 	"\x10lastIncludedTerm\x18\x04 \x01(\x04R\x10lastIncludedTerm\x12\x16\n" +
-	"\x06offset\x18\x05 \x01(\x04R\x06offset\x12!\n" +
-	"\x04data\x18\x06 \x03(\v2\r.proto.KVPairR\x04data\x12\x12\n" +
-	"\x04done\x18\a \x01(\bR\x04done\"\x8d\x01\n" +
+	"\x06offset\x18\x05 \x01(\x04R\x06offset\x12\x12\n" +
+	"\x04data\x18\x06 \x01(\fR\x04data\x12\x12\n" +
+	"\x04done\x18\a \x01(\bR\x04done\"p\n" +
+	"\x14InstallSnapShotReply\x12\x12\n" +
+	"\x04Term\x18\x01 \x01(\x04R\x04Term\x12\x16\n" +
+	"\x06Offset\x18\x02 \x01(\x04R\x06Offset\x12\x18\n" +
+	"\aSuccess\x18\x03 \x01(\bR\aSuccess\x12\x12\n" +
+	"\x04Done\x18\x04 \x01(\bR\x04Done\"\x8d\x01\n" +
 	"\x0fRequestVoteArgs\x12\x12\n" +
 	"\x04Term\x18\x01 \x01(\x04R\x04Term\x12 \n" +
 	"\vCandidateID\x18\x02 \x01(\x04R\vCandidateID\x12\"\n" +
@@ -687,65 +778,65 @@ const file_serialization_proto_rawDesc = "" +
 	"raft/protob\x06proto3"
 
 var (
-	file_serialization_proto_rawDescOnce sync.Once
-	file_serialization_proto_rawDescData []byte
+	file_proto_serialization_proto_rawDescOnce sync.Once
+	file_proto_serialization_proto_rawDescData []byte
 )
 
-func file_serialization_proto_rawDescGZIP() []byte {
-	file_serialization_proto_rawDescOnce.Do(func() {
-		file_serialization_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_serialization_proto_rawDesc), len(file_serialization_proto_rawDesc)))
+func file_proto_serialization_proto_rawDescGZIP() []byte {
+	file_proto_serialization_proto_rawDescOnce.Do(func() {
+		file_proto_serialization_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_serialization_proto_rawDesc), len(file_proto_serialization_proto_rawDesc)))
 	})
-	return file_serialization_proto_rawDescData
+	return file_proto_serialization_proto_rawDescData
 }
 
-var file_serialization_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_serialization_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
-var file_serialization_proto_goTypes = []any{
-	(Command)(0),                // 0: proto.Command
-	(*KVPair)(nil),              // 1: proto.KVPair
-	(*RaftLog)(nil),             // 2: proto.RaftLog
-	(*AppendEntriesArgs)(nil),   // 3: proto.AppendEntriesArgs
-	(*AppendEntriesReply)(nil),  // 4: proto.AppendEntriesReply
-	(*InstallSnapShotArgs)(nil), // 5: proto.InstallSnapShotArgs
-	(*RequestVoteArgs)(nil),     // 6: proto.RequestVoteArgs
-	(*RequestVoteReply)(nil),    // 7: proto.RequestVoteReply
-	(*RaftState)(nil),           // 8: proto.RaftState
+var file_proto_serialization_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_serialization_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_proto_serialization_proto_goTypes = []any{
+	(Command)(0),                 // 0: proto.Command
+	(*KVPair)(nil),               // 1: proto.KVPair
+	(*RaftLog)(nil),              // 2: proto.RaftLog
+	(*AppendEntriesArgs)(nil),    // 3: proto.AppendEntriesArgs
+	(*AppendEntriesReply)(nil),   // 4: proto.AppendEntriesReply
+	(*InstallSnapShotArgs)(nil),  // 5: proto.InstallSnapShotArgs
+	(*InstallSnapShotReply)(nil), // 6: proto.InstallSnapShotReply
+	(*RequestVoteArgs)(nil),      // 7: proto.RequestVoteArgs
+	(*RequestVoteReply)(nil),     // 8: proto.RequestVoteReply
+	(*RaftState)(nil),            // 9: proto.RaftState
 }
-var file_serialization_proto_depIdxs = []int32{
+var file_proto_serialization_proto_depIdxs = []int32{
 	0, // 0: proto.KVPair.command:type_name -> proto.Command
 	0, // 1: proto.RaftLog.command:type_name -> proto.Command
 	1, // 2: proto.AppendEntriesArgs.Entries:type_name -> proto.KVPair
-	1, // 3: proto.InstallSnapShotArgs.data:type_name -> proto.KVPair
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
-func init() { file_serialization_proto_init() }
-func file_serialization_proto_init() {
-	if File_serialization_proto != nil {
+func init() { file_proto_serialization_proto_init() }
+func file_proto_serialization_proto_init() {
+	if File_proto_serialization_proto != nil {
 		return
 	}
-	file_serialization_proto_msgTypes[0].OneofWrappers = []any{}
-	file_serialization_proto_msgTypes[1].OneofWrappers = []any{}
+	file_proto_serialization_proto_msgTypes[0].OneofWrappers = []any{}
+	file_proto_serialization_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_serialization_proto_rawDesc), len(file_serialization_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_serialization_proto_rawDesc), len(file_proto_serialization_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_serialization_proto_goTypes,
-		DependencyIndexes: file_serialization_proto_depIdxs,
-		EnumInfos:         file_serialization_proto_enumTypes,
-		MessageInfos:      file_serialization_proto_msgTypes,
+		GoTypes:           file_proto_serialization_proto_goTypes,
+		DependencyIndexes: file_proto_serialization_proto_depIdxs,
+		EnumInfos:         file_proto_serialization_proto_enumTypes,
+		MessageInfos:      file_proto_serialization_proto_msgTypes,
 	}.Build()
-	File_serialization_proto = out.File
-	file_serialization_proto_goTypes = nil
-	file_serialization_proto_depIdxs = nil
+	File_proto_serialization_proto = out.File
+	file_proto_serialization_proto_goTypes = nil
+	file_proto_serialization_proto_depIdxs = nil
 }

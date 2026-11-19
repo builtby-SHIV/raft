@@ -24,13 +24,13 @@ func TestOpenWALAndWriteEntries(t *testing.T) {
 	}
 	defer wal.Close()
 
-	if err := wal.WriteEntry(proto.Command_PUT, "user:1", []byte("alice"), 1); err != nil {
+	if err := wal.WriteEntry(1, proto.Command_PUT, "user:1", []byte("alice"), 1); err != nil {
 		t.Fatalf("failed to write put entry: %v", err)
 	}
-	if err := wal.WriteEntry(proto.Command_PUT, "user:2", []byte("bob"), 1); err != nil {
+	if err := wal.WriteEntry(2, proto.Command_PUT, "user:2", []byte("bob"), 1); err != nil {
 		t.Fatalf("failed to write put entry: %v", err)
 	}
-	if err := wal.WriteEntry(proto.Command_DELETE, "user:1", nil, 2); err != nil {
+	if err := wal.WriteEntry(3, proto.Command_DELETE, "user:1", nil, 2); err != nil {
 		t.Fatalf("failed to write delete entry: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestSnapshotCreationAndMetadata(t *testing.T) {
 		if i == 5 {
 			term = 2
 		}
-		if err := wal.WriteEntry(cmd, key, []byte(val), term); err != nil {
+		if err := wal.WriteEntry(uint64(i), cmd, key, []byte(val), term); err != nil {
 			t.Fatalf("failed to write entry %d: %v", i, err)
 		}
 	}
@@ -147,7 +147,7 @@ func TestSnapshotCrossing10000Entries(t *testing.T) {
 		key := fmt.Sprintf("k-%d", i%500)
 		val := fmt.Sprintf("v-%d", i)
 		term := uint64(3)
-		if err := wal.WriteEntry(cmd, key, []byte(val), term); err != nil {
+		if err := wal.WriteEntry(uint64(i), cmd, key, []byte(val), term); err != nil {
 			t.Fatalf("failed to write entry %d: %v", i, err)
 		}
 	}
@@ -196,7 +196,7 @@ func TestRepair(t *testing.T) {
 	defer wal.Close()
 
 	for i := 1; i <= 5; i++ {
-		_ = wal.WriteEntry(proto.Command_PUT, fmt.Sprintf("k%d", i), []byte(fmt.Sprintf("v%d", i)), 1)
+		_ = wal.WriteEntry(uint64(i), proto.Command_PUT, fmt.Sprintf("k%d", i), []byte(fmt.Sprintf("v%d", i)), 1)
 	}
 
 	// Repair from index 4: entries 4 and 5 should be truncated
@@ -235,10 +235,10 @@ func TestGetLastTermAndIndex(t *testing.T) {
 	}
 
 	// 2. Log has entries
-	if err := wal.WriteEntry(proto.Command_PUT, "k1", []byte("v1"), 1); err != nil {
+	if err := wal.WriteEntry(1, proto.Command_PUT, "k1", []byte("v1"), 1); err != nil {
 		t.Fatalf("failed to write entry 1: %v", err)
 	}
-	if err := wal.WriteEntry(proto.Command_PUT, "k2", []byte("v2"), 3); err != nil {
+	if err := wal.WriteEntry(2, proto.Command_PUT, "k2", []byte("v2"), 3); err != nil {
 		t.Fatalf("failed to write entry 2: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestGetLastTermAndIndex(t *testing.T) {
 	}
 
 	// 4. Log appends a new entry after the snapshot
-	if err := wal.WriteEntry(proto.Command_PUT, "k3", []byte("v3"), 5); err != nil {
+	if err := wal.WriteEntry(3, proto.Command_PUT, "k3", []byte("v3"), 5); err != nil {
 		t.Fatalf("failed to write entry after snapshot: %v", err)
 	}
 	term, idx, err = wal.GetLastTermAndIndex()
@@ -307,10 +307,10 @@ func TestGetFirstTermAndIndex(t *testing.T) {
 	}
 
 	// 2. Log has entries
-	if err := wal.WriteEntry(proto.Command_PUT, "k1", []byte("v1"), 1); err != nil {
+	if err := wal.WriteEntry(1, proto.Command_PUT, "k1", []byte("v1"), 1); err != nil {
 		t.Fatalf("failed to write entry 1: %v", err)
 	}
-	if err := wal.WriteEntry(proto.Command_PUT, "k2", []byte("v2"), 3); err != nil {
+	if err := wal.WriteEntry(2, proto.Command_PUT, "k2", []byte("v2"), 3); err != nil {
 		t.Fatalf("failed to write entry 2: %v", err)
 	}
 
@@ -344,7 +344,7 @@ func TestGetFirstTermAndIndex(t *testing.T) {
 	}
 
 	// 4. Log appends a new entry after snapshot
-	if err := wal.WriteEntry(proto.Command_PUT, "k3", []byte("v3"), 5); err != nil {
+	if err := wal.WriteEntry(3, proto.Command_PUT, "k3", []byte("v3"), 5); err != nil {
 		t.Fatalf("failed to write entry after snapshot: %v", err)
 	}
 	term, idx, err = wal.GetFirstTermAndIndex()
@@ -375,11 +375,11 @@ func TestGetEntriesFrom(t *testing.T) {
 	// Index 3, Term 2
 	// Index 4, Term 2
 	// Index 5, Term 3
-	_ = wal.WriteEntry(proto.Command_PUT, "k1", []byte("v1"), 1)
-	_ = wal.WriteEntry(proto.Command_PUT, "k2", []byte("v2"), 1)
-	_ = wal.WriteEntry(proto.Command_PUT, "k3", []byte("v3"), 2)
-	_ = wal.WriteEntry(proto.Command_PUT, "k4", []byte("v4"), 2)
-	_ = wal.WriteEntry(proto.Command_PUT, "k5", []byte("v5"), 3)
+	_ = wal.WriteEntry(1, proto.Command_PUT, "k1", []byte("v1"), 1)
+	_ = wal.WriteEntry(2, proto.Command_PUT, "k2", []byte("v2"), 1)
+	_ = wal.WriteEntry(3, proto.Command_PUT, "k3", []byte("v3"), 2)
+	_ = wal.WriteEntry(4, proto.Command_PUT, "k4", []byte("v4"), 2)
+	_ = wal.WriteEntry(5, proto.Command_PUT, "k5", []byte("v5"), 3)
 
 	// Case 1: startIndex = 1 (start of log)
 	entries, prevIdx, prevTerm, err := wal.GetEntriesFrom(1)
@@ -436,7 +436,7 @@ func TestGetEntriesFrom(t *testing.T) {
 	}
 
 	// Now append entry 6, term 4
-	_ = wal.WriteEntry(proto.Command_PUT, "k6", []byte("v6"), 4)
+	_ = wal.WriteEntry(6, proto.Command_PUT, "k6", []byte("v6"), 4)
 
 	// startIndex = 6: entry 6 is in log, entry 5 is from the snapshot (lastIndex 5, lastTerm 3)
 	entries, prevIdx, prevTerm, err = wal.GetEntriesFrom(6)
@@ -482,11 +482,11 @@ func TestStreamSnapshot(t *testing.T) {
 	// PUT c = 3
 	// PUT a = 10 (overwrite)
 	// DELETE b
-	_ = wal.WriteEntry(proto.Command_PUT, "a", []byte("1"), 1)
-	_ = wal.WriteEntry(proto.Command_PUT, "b", []byte("2"), 1)
-	_ = wal.WriteEntry(proto.Command_PUT, "c", []byte("3"), 2)
-	_ = wal.WriteEntry(proto.Command_PUT, "a", []byte("10"), 2)
-	_ = wal.WriteEntry(proto.Command_DELETE, "b", nil, 3)
+	_ = wal.WriteEntry(1, proto.Command_PUT, "a", []byte("1"), 1)
+	_ = wal.WriteEntry(2, proto.Command_PUT, "b", []byte("2"), 1)
+	_ = wal.WriteEntry(3, proto.Command_PUT, "c", []byte("3"), 2)
+	_ = wal.WriteEntry(4, proto.Command_PUT, "a", []byte("10"), 2)
+	_ = wal.WriteEntry(5, proto.Command_DELETE, "b", nil, 3)
 
 	_, err = wal.CreateSnapshot()
 	if err != nil {

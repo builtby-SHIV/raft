@@ -9,9 +9,11 @@ enum Command {
 }
 
 message KVPair {
-    string Key = 1;
-    optional string Value = 2;
-    Command command = 3;
+    uint64 Term = 1;
+    uint64 Index = 2;
+    string Key = 3;
+    optional string Value = 4;
+    Command command = 5;
 }
 
 message RaftLog {
@@ -45,8 +47,15 @@ message InstallSnapShotArgs {
     uint64 lastIncludedIndex = 3;
     uint64 lastIncludedTerm = 4;
     uint64 offset = 5;
-    repeated KVPair data = 6;
+    bytes data = 6;
     bool done = 7;
+}
+
+message InstallSnapShotReply {
+    uint64 Term = 1;
+    uint64 Offset = 2;
+    bool Success = 3;
+    bool Done = 4;
 }
 
 message RequestVoteArgs {

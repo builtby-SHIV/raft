@@ -138,6 +138,15 @@ func handleIncoming(conn net.Conn, ctx context.Context, rpCh chan *RPCEvent) {
 	}
 }
 
+func (t *TCPTransport) resetPeer(peer *peerConn) {
+	peer.mu.Lock()
+	defer peer.mu.Unlock()
+	if peer.conn != nil {
+		_ = peer.conn.Close()
+		peer.conn = nil
+	}
+}
+
 func (t *TCPTransport) sendToPeers(
 	addr string, 
 	msgType byte,
@@ -167,7 +176,7 @@ func (t *TCPTransport) sendToPeers(
 		}
 	case TypeInstallSnapShot:
 		if a, ok := args.(*proto.InstallSnapShotArgs); ok {
-			reply, err = t.sendInstallSnapshots(addr, a)
+			reply, err = t.SendInstallSnapshots(addr, a)
 		} else {
 			err = fmt.Errorf("expected *proto.InstallSnapShotArgs, got %T", args)
 		}
@@ -186,28 +195,38 @@ func (t *TCPTransport) sendToPeers(
 		msgSent = m
 	}
 
+	eventType := msgType
+	switch msgType {
+	case TypeAppendEntries:
+		eventType = TypeAppendEntriesReply
+	case TypeInstallSnapShot:
+		eventType = TypeInstallSnapShotReply
+	}
+
 	select {
-	case replyCh <- &RPCEvent{msgType: msgType, msgRecv: reply, msgSent: msgSent, peer: addr, sendBack: sendBack}:
+	case replyCh <- &RPCEvent{
+		msgType: eventType, 
+		msgRecv: reply, 
+		msgSent: msgSent, 
+		peer: addr, 
+		sendBack: sendBack,
+	}:
 	case <-t.ctx.Done():
 		return
 	}
 
 	go func() {
-		for {
-			select {
-			case data, ok := <-sendBack:
-				if !ok || data == nil {
-					return
-				}
-				switch data.msgType {
-				case TypeAppendEntries, TypeInstallSnapShot:
-					go t.sendToPeers(addr, data.msgType, data.msgSent, replyCh)
-				}
-			case <-t.ctx.Done():
-				return
-			case <-done:
+		select {
+		case data, ok := <-sendBack:
+			if !ok || data == nil {
 				return
 			}
+			switch data.msgType {
+			case TypeAppendEntries, TypeInstallSnapShot:
+				go t.sendToPeers(addr, data.msgType, data.msgSent, replyCh)
+			}
+		case <-t.ctx.Done():
+			return
 		}
 	}()
 }
@@ -265,33 +284,33 @@ func (t *TCPTransport) AppendEntries(
 	}
 
 	if err := EncodeAndWriteMessage(peer.conn, TypeAppendEntries, args); err != nil {
+		t.resetPeer(peer)
 		return &proto.AppendEntriesReply{}, err
 	}
 
 	_, decodedMsg, err := DecodeAndReadMessage(peer.conn)
 	if err != nil {
+		t.resetPeer(peer)
 		return &proto.AppendEntriesReply{}, fmt.Errorf("Error in decoding the message %w", err)
 	}
-	
-	return decodedMsg.(*proto.AppendEntriesReply), nil
+
+	reply, ok := decodedMsg.(*proto.AppendEntriesReply)
+	if !ok {
+		t.resetPeer(peer)
+		return &proto.AppendEntriesReply{}, fmt.Errorf("expected *proto.AppendEntriesReply, got %T", decodedMsg)
+	}
+	return reply, nil
 }
 
 func (t *TCPTransport) SendInstallSnapshots(
 	addr string, 
 	args *proto.InstallSnapShotArgs,
-) (*proto.AppendEntriesReply, error) {
-	return t.sendInstallSnapshots(addr, args)
-}
-
-func (t *TCPTransport) sendInstallSnapshots(
-	addr string, 
-	args *proto.InstallSnapShotArgs,
-) (*proto.AppendEntriesReply, error) {
+) (*proto.InstallSnapShotReply, error) {
 	t.mu.RLock()
 	peer, exists := t.Peers[addr]
 	t.mu.RUnlock() 
 	if !exists {
-		return &proto.AppendEntriesReply{}, fmt.Errorf("peer %s not found", addr)
+		return &proto.InstallSnapShotReply{}, fmt.Errorf("peer %s not found", addr)
 	}
 
 	done := make(chan struct{})
@@ -336,15 +355,21 @@ func (t *TCPTransport) sendInstallSnapshots(
 	}
 
 	if err := EncodeAndWriteMessage(peer.conn, TypeInstallSnapShot, args); err != nil {
-		return &proto.AppendEntriesReply{}, err
+		t.resetPeer(peer)
+		return &proto.InstallSnapShotReply{}, err
 	}
 
 	_, decodedMsg, err := DecodeAndReadMessage(peer.conn)
 	if err != nil {
-		return &proto.AppendEntriesReply{}, fmt.Errorf("Error in decoding the message %w", err)
+		t.resetPeer(peer)
+		return &proto.InstallSnapShotReply{}, fmt.Errorf("Error in decoding the message %w", err)
 	}
 	
-	return decodedMsg.(*proto.AppendEntriesReply), nil
+	reply, ok := decodedMsg.(*proto.InstallSnapShotReply)
+	if !ok {
+		return &proto.InstallSnapShotReply{}, fmt.Errorf("expected *proto.InstallSnapShotReply, got %T", decodedMsg)
+	}
+	return reply, nil
 }
 
 func (t *TCPTransport) sendToRequestVote(

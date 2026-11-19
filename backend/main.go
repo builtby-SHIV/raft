@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,16 +35,16 @@ type NonAddRequest struct {
 }
 
 type Server struct {
-	ns  *raft.NodeState
+	ns *raft.NodeState
 }
+
+const commandTimeout = 10 * time.Second
 
 type ServerConfig struct {
 	NodeID   uint64
 	HTTPAddr string
 	TCPAddr  string
-	DataDir  string
 	Role     string
-	Peers    string
 }
 
 func parseRole(s string) (string, error) {
@@ -56,6 +55,8 @@ func parseRole(s string) (string, error) {
 		return raft.RoleFollower, nil
 	case "candidate":
 		return raft.RoleCandidate, nil
+	case "observer":
+		return raft.RoleFollower, nil
 	case "unknown", "":
 		return raft.RoleUnknown, nil
 	default:
@@ -69,18 +70,31 @@ func (s *Server) add(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	if err := s.ns.Log.WriteEntry(proto.Command_PUT, req.Key, []byte(req.Val), s.ns.RaftState.Term); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if strings.TrimSpace(req.Key) == "" {
+		http.Error(w, "missing key", http.StatusBadRequest)
 		return
 	}
-	s.ns.ClientCh<- &raft.ClientCmd{ Command: proto.Command_PUT, Key: req.Key, Value: req.Val }
-	status := <-s.ns.ClientCh
-	if status.Committed == true {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(Response{Message: "Key-Val pair created"})
+	if s.ns == nil {
+		http.Error(w, "node is not initialized", http.StatusServiceUnavailable)
+		return
 	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), commandTimeout)
+	defer cancel()
+
+	err := s.ns.Apply(ctx, &raft.ClientCmd{Command: proto.Command_PUT, Key: req.Key, Value: req.Val})
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, raft.ErrNotLeader) {
+			status = http.StatusServiceUnavailable
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(Response{Message: "Key-Val pair created"})
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -94,8 +108,19 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing key", http.StatusBadRequest)
 		return
 	}
+	if s.ns == nil {
+		http.Error(w, "node is not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	value, ok := s.ns.Get(req.Key)
 	w.Header().Set("Content-Type", "application/json")
-	// _ = json.NewEncoder(w).Encode(map[string]string{req.Key: v})
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"key": req.Key, "error": "key not found"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"key": req.Key, "value": value})
 }
 
 func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
@@ -109,14 +134,75 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing key", http.StatusBadRequest)
 		return
 	}
-	
-	if err := s.ns.Log.WriteEntry(proto.Command_DELETE, req.Key, nil, s.ns.RaftState.Term); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if s.ns == nil {
+		http.Error(w, "node is not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	s.ns.ClientCh<- &raft.ClientCmd{ Command: proto.Command_DELETE, Key: req.Key, Value: "" }
+
+	ctx, cancel := context.WithTimeout(r.Context(), commandTimeout)
+	defer cancel()
+
+	err := s.ns.Apply(ctx, &raft.ClientCmd{Command: proto.Command_DELETE, Key: req.Key})
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, raft.ErrNotLeader) {
+			status = http.StatusServiceUnavailable
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"msg": "Key successfully deleted"})
+}
+
+// state exposes a read-only snapshot of the consensus state for the
+// visualization UI. It never mutates the node.
+func (s *Server) state(w http.ResponseWriter, r *http.Request) {
+	if s.ns == nil {
+		http.Error(w, "node is not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	limit := 250
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(s.ns.SnapshotState(limit))
+}
+
+// events returns the node's recent consensus events as JSON.
+func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	if s.ns == nil {
+		http.Error(w, "node is not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	var since uint64
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			since = parsed
+		}
+	}
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"events": s.ns.RecentEvents(since, limit),
+	})
 }
 
 func normalizeAddr(addr string) (string, string, error) {
@@ -173,9 +259,7 @@ func resolveConfig(
 	idFlag,
 	httpFlag,
 	tcpFlag,
-	roleFlag,
-	dataDirFlag,
-	peersFlag string) (*ServerConfig, error) {
+	roleFlag string) (*ServerConfig, error) {
 	if strings.TrimSpace(idFlag) == "" {
 		return nil, errors.New("--id is required")
 	}
@@ -208,52 +292,12 @@ func resolveConfig(
 		return nil, fmt.Errorf("invalid --role=%q: %w", roleFlag, err)
 	}
 
-	dataDir := strings.TrimSpace(dataDirFlag)
-	if dataDir == "" {
-		return nil, errors.New("--data is required")
-	}
-
-	peers := strings.TrimSpace(peersFlag)
-	if peers == "" {
-		return nil, errors.New("--peers is required")
-	}
-
 	return &ServerConfig{
 		NodeID:   nodeID,
 		HTTPAddr: normHTTP,
 		TCPAddr:  normTCP,
-		DataDir:  dataDir,
 		Role:     role,
-		Peers:    peers,
 	}, nil
-}
-
-func parsePeersList(raw string, selfTCP string) []string {
-	var candidates []string
-	if strings.TrimSpace(raw) != "" {
-		for _, p := range strings.Split(raw, ",") {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				norm, _, err := normalizeAddr(p)
-				if err == nil {
-					candidates = append(candidates, norm)
-				} else {
-					candidates = append(candidates, p)
-				}
-			}
-		}
-	} else {
-		candidates = []string{":7001", ":7002", ":7003", ":7004", ":7005"}
-	}
-
-	normSelf, _, _ := normalizeAddr(selfTCP)
-	var targets []string
-	for _, c := range candidates {
-		if c != selfTCP && c != normSelf {
-			targets = append(targets, c)
-		}
-	}
-	return targets
 }
 
 func main() {
@@ -261,57 +305,61 @@ func main() {
 	httpFlag := flag.String("http", "", "HTTP listen address")
 	tcpFlag := flag.String("tcp", "", "TCP listen address")
 	roleFlag := flag.String("role", "", "Node role: leader | follower | observer")
-	dataDirFlag := flag.String("data", "", "Storage directory")
-	peersFlag := flag.String("peers", "", "List of peer TCP addresses")
 	flag.Parse()
 
-	cfg, err := resolveConfig(*idFlag, *httpFlag, *tcpFlag, *roleFlag, *dataDirFlag, *peersFlag)
+	cfg, err := resolveConfig(*idFlag, *httpFlag, *tcpFlag, *roleFlag)
 	if err != nil {
 		log.Fatalf("[startup] %v", err)
 	}
 
-	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
-		log.Fatalf("[startup] create data dir %s: %v", cfg.DataDir, err)
+	baseDir := storage.DefaultStorageBaseDir()
+	processDir, err := storage.ProcessStorageDir(baseDir, cfg.NodeID, cfg.TCPAddr)
+	if err != nil {
+		log.Fatalf("[startup] resolve storage directory: %v", err)
+	}
+	layout := storage.NewStorageLayout(processDir)
+	if err := layout.Ensure(); err != nil {
+		log.Fatalf("[startup] %v", err)
 	}
 
-	procCfg, err := storage.LoadOrInitProcessConfig(cfg.DataDir, *httpFlag, *tcpFlag)
+	procCfg, err := storage.LoadOrInitProcessConfig(layout.Root, *httpFlag, *tcpFlag)
 	if err != nil {
 		log.Fatalf("[startup] load or init process config: %v", err)
 	}
 
-	log.Printf("[node] id=%d  role=%s  http=%s  tcp=%s  term=%d  votedFor=%d  data=%s",
-		cfg.NodeID, cfg.Role, cfg.HTTPAddr, cfg.TCPAddr, procCfg.CurrentTerm, procCfg.VotedFor, cfg.DataDir)
-
-	walDir := filepath.Join(cfg.DataDir, "wal")
-	if err := os.MkdirAll(walDir, 0755); err != nil {
-		log.Fatalf("[startup] create wal dir %s: %v", walDir, err)
-	}
-	wal, err := storage.OpenWAL(walDir, true, 128000, 1000)
-	if err != nil {
-		log.Fatalf("[startup] open WAL at %s: %v", walDir, err)
-	}
-	defer wal.Close()
-
-	sstableDir := filepath.Join(cfg.DataDir, "sstable")
-	if err := os.MkdirAll(sstableDir, 0755); err != nil {
-		log.Fatalf("[startup] create sstable dir %s: %v", sstableDir, err)
-	}
+	log.Printf("[node] id=%d  role=%s  http=%s  tcp=%s  term=%d  votedFor=%d  storage=%s",
+		cfg.NodeID, cfg.Role, cfg.HTTPAddr, cfg.TCPAddr, procCfg.CurrentTerm, procCfg.VotedFor, layout.Root)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	_ = parsePeersList(*peersFlag, cfg.TCPAddr)
+	raftState := &proto.RaftState{Term: procCfg.CurrentTerm}
+	if procCfg.VotedFor > 0 {
+		raftState.VotedFor = strconv.FormatInt(procCfg.VotedFor, 10)
+	}
+
+	ns := raft.NewNodeState(cfg.NodeID, cfg.HTTPAddr, cfg.TCPAddr, layout.Root, cfg.Role, ctx, raftState)
+	if ns == nil {
+		log.Fatalf("[startup] failed to initialize node state in %s", layout.Root)
+	}
+	go ns.Start()
+	defer func() {
+		if err := ns.Close(); err != nil {
+			log.Printf("[node] close: %v", err)
+		}
+	}()
 
 	var httpServer *http.Server
 
 	if cfg.HTTPAddr != "" {
-		srv := &Server{
-		}
+		srv := &Server{ns: ns}
 		mux := http.NewServeMux()
 
 		mux.HandleFunc("POST /put", srv.add)
 		mux.HandleFunc("GET /get", srv.get)
 		mux.HandleFunc("DELETE /del", srv.delete)
+		mux.HandleFunc("GET /state", srv.state)
+		mux.HandleFunc("GET /events", srv.events)
 
 		httpServer = &http.Server{Addr: cfg.HTTPAddr, Handler: mux}
 		go func() {
